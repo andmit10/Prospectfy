@@ -12,7 +12,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -20,12 +19,11 @@ import {
 } from '@/components/ui/form'
 import { ImportCsvDialog } from '@/components/leads/import-csv-dialog'
 import { toast } from 'sonner'
-import { Check, User, Key, Upload } from 'lucide-react'
+import { Check, User, Upload } from 'lucide-react'
 
 const STEPS = [
-  { label: 'Perfil',          icon: User },
-  { label: 'Integrações',     icon: Key },
-  { label: 'Importar leads',  icon: Upload },
+  { label: 'Perfil',         icon: User },
+  { label: 'Importar leads', icon: Upload },
 ]
 
 const profileSchema = z.object({
@@ -33,14 +31,7 @@ const profileSchema = z.object({
   company_name: z.string().min(1, 'Nome da empresa obrigatório'),
 })
 
-// Directfy e Calendly são opcionais — podem ser configurados depois em /settings
-const integrationsSchema = z.object({
-  directfy_api_key: z.string().optional(),
-  calendly_url: z.string().url('URL inválida').optional().or(z.literal('')),
-})
-
-type ProfileValues      = z.infer<typeof profileSchema>
-type IntegrationsValues = z.infer<typeof integrationsSchema>
+type ProfileValues = z.infer<typeof profileSchema>
 
 export function OnboardingWizard() {
   const router = useRouter()
@@ -52,11 +43,6 @@ export function OnboardingWizard() {
   const profileForm = useForm<ProfileValues>({
     resolver: zodResolver(profileSchema),
     defaultValues: { full_name: '', company_name: '' },
-  })
-
-  const integrationsForm = useForm<IntegrationsValues>({
-    resolver: zodResolver(integrationsSchema),
-    defaultValues: { directfy_api_key: '', calendly_url: '' },
   })
 
   // ── Step 0: Perfil ────────────────────────────────────────────────────────
@@ -71,23 +57,7 @@ export function OnboardingWizard() {
     }
   }
 
-  // ── Step 1: Integrações (opcional) ────────────────────────────────────────
-  async function handleIntegrationsNext() {
-    const values = integrationsForm.getValues()
-    try {
-      if (values.directfy_api_key || values.calendly_url) {
-        await updateProfile.mutateAsync({
-          directfy_api_key: values.directfy_api_key || undefined,
-          calendly_url:     values.calendly_url     || undefined,
-        })
-      }
-      setStep(2)
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Erro ao salvar integrações.')
-    }
-  }
-
-  // ── Step 2: Concluir ──────────────────────────────────────────────────────
+  // ── Step 1: Concluir ──────────────────────────────────────────────────────
   async function handleFinish() {
     try {
       await updateProfile.mutateAsync({ onboarding_completed: true })
@@ -165,68 +135,8 @@ export function OnboardingWizard() {
             </Form>
           )}
 
-          {/* ── Step 1: Integrações ── */}
+          {/* ── Step 1: Importar leads ── */}
           {step === 1 && (
-            <Form {...integrationsForm}>
-              <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleIntegrationsNext() }}>
-                <p className="text-sm text-muted-foreground">
-                  Essas integrações são <strong>opcionais agora</strong> — você pode configurar depois em{' '}
-                  <span className="font-medium">Configurações</span>.
-                </p>
-                <FormField
-                  control={integrationsForm.control}
-                  name="directfy_api_key"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Directfy API Key <span className="text-muted-foreground font-normal">(opcional)</span></FormLabel>
-                      <FormControl>
-                        <Input type="password" placeholder="df_live_..." {...field} />
-                      </FormControl>
-                      <FormDescription>
-                        Encontre no painel do Directfy → Configurações → API
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={integrationsForm.control}
-                  name="calendly_url"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>URL do Calendly <span className="text-muted-foreground font-normal">(opcional)</span></FormLabel>
-                      <FormControl>
-                        <Input placeholder="https://calendly.com/seu-usuario" {...field} />
-                      </FormControl>
-                      <FormDescription>
-                        Enviado automaticamente quando o lead está pronto para reunião
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" className="flex-1" onClick={() => setStep(0)}>
-                    ← Voltar
-                  </Button>
-                  <Button type="submit" className="flex-1" disabled={updateProfile.isPending}>
-                    {updateProfile.isPending ? 'Salvando...' : 'Próximo →'}
-                  </Button>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="w-full text-muted-foreground text-sm"
-                  onClick={() => setStep(2)}
-                >
-                  Pular por agora
-                </Button>
-              </form>
-            </Form>
-          )}
-
-          {/* ── Step 2: Importar leads ── */}
-          {step === 2 && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Importe sua lista de leads para começar a prospectar agora. Você pode fazer isso depois também.
