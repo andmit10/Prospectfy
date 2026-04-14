@@ -5,7 +5,14 @@
       "Read(//c/Users/amitk/OneDrive/Documentos/Antigravity/Prospectfy/**)",
       "Bash(mv orbya-saas/CLAUDE.md /tmp/CLAUDE.md)",
       "Bash(npx create-next-app@latest orbya-saas --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\")",
-      "Bash(npx shadcn@latest init -d)"
+      "Bash(npx shadcn@latest init -d)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest add card badge avatar input label form table sheet dialog dropdown-menu separator skeleton sonner tooltip scroll-area select textarea)",
+      "Bash(npm run:*)",
+      "Bash(npx shadcn@latest add form --overwrite)",
+      "Bash(npx shadcn@latest add form)",
+      "Bash(npx shadcn@4.2.0 add form)",
+      "Bash(git config:*)"
     ]
   }
 }
