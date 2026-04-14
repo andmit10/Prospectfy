@@ -22,7 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { PipelineBadge } from './pipeline-badge'
 import { trpc } from '@/lib/trpc-client'
-import { ArrowUpDown, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { ArrowUpDown, ChevronLeft, ChevronRight, Plus, Download } from 'lucide-react'
 import type { Lead, PipelineStatus } from '@/types'
 import Link from 'next/link'
 import { ImportCsvDialog } from './import-csv-dialog'
@@ -117,6 +117,12 @@ export function LeadsTable() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setImportOpen(true)}>
             Importar CSV
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => window.open('/api/leads/export', '_blank')}
+          >
+            <Download className="mr-1 h-4 w-4" /> Exportar
           </Button>
           <Button render={<Link href="/leads/new" />}>
             <Plus className="mr-1 h-4 w-4" /> Novo lead

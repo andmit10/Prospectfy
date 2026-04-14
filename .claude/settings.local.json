@@ -12,7 +12,9 @@
       "Bash(npx shadcn@latest add form --overwrite)",
       "Bash(npx shadcn@latest add form)",
       "Bash(npx shadcn@4.2.0 add form)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(node -e \"const s = require\\('stripe'\\); console.log\\(s.LATEST_API_VERSION\\)\")",
+      "Bash(node -e \"const Stripe = require\\('stripe'\\); const s = new Stripe\\('sk_test_dummy'\\); console.log\\(Stripe.LATEST_API_VERSION\\)\")"
     ]
   }
 }

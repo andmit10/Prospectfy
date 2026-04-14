@@ -21,6 +21,7 @@ export const profileRouter = router({
         phone: z.string().optional(),
         directfy_api_key: z.string().optional(),
         calendly_url: z.string().url().optional().or(z.literal('')),
+        onboarding_completed: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {

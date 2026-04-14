@@ -9,6 +9,7 @@ import {
   Settings,
   Bot,
   LogOut,
+  KanbanSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -19,6 +20,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 const nav = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/leads', label: 'Leads', icon: Users },
+  { href: '/pipeline', label: 'Pipeline', icon: KanbanSquare },
   { href: '/campaigns', label: 'Campanhas', icon: Megaphone },
   { href: '/agent', label: 'Agente', icon: Bot },
   { href: '/settings', label: 'Configurações', icon: Settings },
