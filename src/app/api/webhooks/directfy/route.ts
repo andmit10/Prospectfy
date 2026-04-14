@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { clientEnv } from '@/lib/env'
-import { serverEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 import type { DirectfyWebhookPayload } from '@/server/services/directfy'
 
 // Use service role to bypass RLS for webhook writes

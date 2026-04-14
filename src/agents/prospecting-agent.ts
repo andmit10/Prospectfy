@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { serverEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 import type { Lead, CadenciaStep, Interaction } from '@/types'
 
 import { sendWhatsappSchema, executeSendWhatsapp } from './tools/send-whatsapp'
@@ -8,7 +8,7 @@ import { updateLeadScoreSchema, executeUpdateLeadScore } from './tools/update-le
 import { movePipelineStageSchema, executeMovePipelineStage } from './tools/move-pipeline-stage'
 import { scheduleMeetingSchema, executeScheduleMeeting } from './tools/schedule-meeting'
 
-const anthropic = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY })
+const anthropic = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY ?? '' })
 
 const TOOLS = [
   sendWhatsappSchema,

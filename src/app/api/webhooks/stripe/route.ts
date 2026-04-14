@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
-import { serverEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 import { createServiceClient } from '@/lib/supabase/service'
 
-const stripe = new Stripe(serverEnv.STRIPE_SECRET_KEY, { apiVersion: '2026-03-25.dahlia' })
-
 export async function POST(request: Request) {
+  if (!serverEnv.STRIPE_SECRET_KEY || !serverEnv.STRIPE_WEBHOOK_SECRET) {
+    return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
+  }
+
+  const stripe = new Stripe(serverEnv.STRIPE_SECRET_KEY, { apiVersion: '2026-03-25.dahlia' })
   const body = await request.text()
   const sig = request.headers.get('stripe-signature') ?? ''
 

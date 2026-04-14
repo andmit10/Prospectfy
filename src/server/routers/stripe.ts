@@ -1,9 +1,12 @@
 import { router, protectedProcedure } from '@/lib/trpc'
-import { serverEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 import { clientEnv } from '@/lib/env'
 import Stripe from 'stripe'
 
 function getStripe() {
+  if (!serverEnv.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY não configurado. Adicione ao .env.local para habilitar billing.')
+  }
   return new Stripe(serverEnv.STRIPE_SECRET_KEY, { apiVersion: '2026-03-25.dahlia' })
 }
 

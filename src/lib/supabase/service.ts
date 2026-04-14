@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
-import { clientEnv, serverEnv } from '@/lib/env'
+import { clientEnv } from '@/lib/env'
+import { serverEnv } from '@/lib/env.server'
 
 // Service-role client — bypasses RLS. Only use in trusted server contexts (workers, crons).
 export function createServiceClient() {
