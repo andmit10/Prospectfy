@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\")",
+      "Read(//c/Users/amitk/OneDrive/Documentos/Antigravity/Prospectfy/**)",
+      "Bash(mv orbya-saas/CLAUDE.md /tmp/CLAUDE.md)",
+      "Bash(npx create-next-app@latest orbya-saas --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\")",
+      "Bash(npx shadcn@latest init -d)"
+    ]
+  }
+}
