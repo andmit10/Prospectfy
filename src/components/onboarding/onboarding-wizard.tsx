@@ -23,23 +23,24 @@ import { toast } from 'sonner'
 import { Check, User, Key, Upload } from 'lucide-react'
 
 const STEPS = [
-  { label: 'Perfil',        icon: User },
-  { label: 'Directfy',     icon: Key },
-  { label: 'Importar leads', icon: Upload },
+  { label: 'Perfil',          icon: User },
+  { label: 'Integrações',     icon: Key },
+  { label: 'Importar leads',  icon: Upload },
 ]
 
 const profileSchema = z.object({
-  full_name: z.string().min(1, 'Nome obrigatório'),
+  full_name:    z.string().min(1, 'Nome obrigatório'),
   company_name: z.string().min(1, 'Nome da empresa obrigatório'),
 })
 
-const directfySchema = z.object({
-  directfy_api_key: z.string().min(1, 'Chave obrigatória'),
+// Directfy e Calendly são opcionais — podem ser configurados depois em /settings
+const integrationsSchema = z.object({
+  directfy_api_key: z.string().optional(),
   calendly_url: z.string().url('URL inválida').optional().or(z.literal('')),
 })
 
-type ProfileValues = z.infer<typeof profileSchema>
-type DirectfyValues = z.infer<typeof directfySchema>
+type ProfileValues      = z.infer<typeof profileSchema>
+type IntegrationsValues = z.infer<typeof integrationsSchema>
 
 export function OnboardingWizard() {
   const router = useRouter()
@@ -53,34 +54,49 @@ export function OnboardingWizard() {
     defaultValues: { full_name: '', company_name: '' },
   })
 
-  const directfyForm = useForm<DirectfyValues>({
-    resolver: zodResolver(directfySchema),
+  const integrationsForm = useForm<IntegrationsValues>({
+    resolver: zodResolver(integrationsSchema),
     defaultValues: { directfy_api_key: '', calendly_url: '' },
   })
 
+  // ── Step 0: Perfil ────────────────────────────────────────────────────────
   async function handleProfileNext() {
     const valid = await profileForm.trigger()
     if (!valid) return
-    const values = profileForm.getValues()
-    await updateProfile.mutateAsync(values)
-    setStep(1)
+    try {
+      await updateProfile.mutateAsync(profileForm.getValues())
+      setStep(1)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar perfil. Tente novamente.')
+    }
   }
 
-  async function handleDirectfyNext() {
-    const valid = await directfyForm.trigger()
-    if (!valid) return
-    const values = directfyForm.getValues()
-    await updateProfile.mutateAsync({
-      directfy_api_key: values.directfy_api_key,
-      calendly_url: values.calendly_url || undefined,
-    })
-    setStep(2)
+  // ── Step 1: Integrações (opcional) ────────────────────────────────────────
+  async function handleIntegrationsNext() {
+    const values = integrationsForm.getValues()
+    try {
+      if (values.directfy_api_key || values.calendly_url) {
+        await updateProfile.mutateAsync({
+          directfy_api_key: values.directfy_api_key || undefined,
+          calendly_url:     values.calendly_url     || undefined,
+        })
+      }
+      setStep(2)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao salvar integrações.')
+    }
   }
 
+  // ── Step 2: Concluir ──────────────────────────────────────────────────────
   async function handleFinish() {
-    await updateProfile.mutateAsync({ onboarding_completed: true } as never)
-    toast.success('Configuração concluída! Bem-vindo ao Orbya.')
-    router.push('/dashboard')
+    try {
+      await updateProfile.mutateAsync({ onboarding_completed: true })
+      toast.success('Configuração concluída! Bem-vindo ao Orbya.')
+      router.push('/dashboard')
+      router.refresh()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao finalizar. Tente novamente.')
+    }
   }
 
   return (
@@ -108,17 +124,19 @@ export function OnboardingWizard() {
       <Card>
         <CardContent className="pt-6 space-y-5">
 
-          {/* Step 0: Profile */}
+          {/* ── Step 0: Perfil ── */}
           {step === 0 && (
             <Form {...profileForm}>
-              <form className="space-y-4">
+              <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleProfileNext() }}>
                 <FormField
                   control={profileForm.control}
                   name="full_name"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Seu nome</FormLabel>
-                      <FormControl><Input placeholder="Anderson Silva" {...field} /></FormControl>
+                      <FormControl>
+                        <Input placeholder="Anderson Mitkiewicz" {...field} />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -129,89 +147,104 @@ export function OnboardingWizard() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Nome da empresa</FormLabel>
-                      <FormControl><Input placeholder="Acme Ltda" {...field} /></FormControl>
+                      <FormControl>
+                        <Input placeholder="Labfy" {...field} />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <Button
-                  type="button"
+                  type="submit"
                   className="w-full"
-                  onClick={handleProfileNext}
                   disabled={updateProfile.isPending}
                 >
-                  Próximo
+                  {updateProfile.isPending ? 'Salvando...' : 'Próximo →'}
                 </Button>
               </form>
             </Form>
           )}
 
-          {/* Step 1: Directfy */}
+          {/* ── Step 1: Integrações ── */}
           {step === 1 && (
-            <Form {...directfyForm}>
-              <form className="space-y-4">
+            <Form {...integrationsForm}>
+              <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); handleIntegrationsNext() }}>
+                <p className="text-sm text-muted-foreground">
+                  Essas integrações são <strong>opcionais agora</strong> — você pode configurar depois em{' '}
+                  <span className="font-medium">Configurações</span>.
+                </p>
                 <FormField
-                  control={directfyForm.control}
+                  control={integrationsForm.control}
                   name="directfy_api_key"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Directfy API Key</FormLabel>
+                      <FormLabel>Directfy API Key <span className="text-muted-foreground font-normal">(opcional)</span></FormLabel>
                       <FormControl>
                         <Input type="password" placeholder="df_live_..." {...field} />
                       </FormControl>
                       <FormDescription>
-                        Encontre sua chave no painel do Directfy → Configurações → API
+                        Encontre no painel do Directfy → Configurações → API
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <FormField
-                  control={directfyForm.control}
+                  control={integrationsForm.control}
                   name="calendly_url"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>URL do Calendly (opcional)</FormLabel>
+                      <FormLabel>URL do Calendly <span className="text-muted-foreground font-normal">(opcional)</span></FormLabel>
                       <FormControl>
                         <Input placeholder="https://calendly.com/seu-usuario" {...field} />
                       </FormControl>
                       <FormDescription>
-                        Usado pelo agente para enviar link de agendamento automaticamente
+                        Enviado automaticamente quando o lead está pronto para reunião
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <div className="flex gap-2">
-                  <Button variant="outline" className="flex-1" onClick={() => setStep(0)}>
-                    Voltar
+                  <Button type="button" variant="outline" className="flex-1" onClick={() => setStep(0)}>
+                    ← Voltar
                   </Button>
-                  <Button
-                    className="flex-1"
-                    onClick={handleDirectfyNext}
-                    disabled={updateProfile.isPending}
-                  >
-                    Próximo
+                  <Button type="submit" className="flex-1" disabled={updateProfile.isPending}>
+                    {updateProfile.isPending ? 'Salvando...' : 'Próximo →'}
                   </Button>
                 </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full text-muted-foreground text-sm"
+                  onClick={() => setStep(2)}
+                >
+                  Pular por agora
+                </Button>
               </form>
             </Form>
           )}
 
-          {/* Step 2: Import leads */}
+          {/* ── Step 2: Importar leads ── */}
           {step === 2 && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Importe sua lista de leads para começar a prospectar. Você pode fazer isso agora ou pular para o dashboard.
+                Importe sua lista de leads para começar a prospectar agora. Você pode fazer isso depois também.
               </p>
               <Button className="w-full" onClick={() => setImportOpen(true)}>
                 <Upload className="mr-2 h-4 w-4" /> Importar CSV / XLSX
               </Button>
-              <Button variant="outline" className="w-full" onClick={handleFinish}>
-                Pular e ir para o dashboard
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={handleFinish}
+                disabled={updateProfile.isPending}
+              >
+                {updateProfile.isPending ? 'Carregando...' : 'Pular e ir para o dashboard'}
               </Button>
             </div>
           )}
+
         </CardContent>
       </Card>
 
