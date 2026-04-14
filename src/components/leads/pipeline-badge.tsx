@@ -1,13 +1,12 @@
-import { Badge } from '@/components/ui/badge'
 import type { PipelineStatus } from '@/types'
 
-const config: Record<PipelineStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-  novo:       { label: 'Novo',       variant: 'secondary' },
-  contatado:  { label: 'Contatado',  variant: 'default' },
-  respondeu:  { label: 'Respondeu',  variant: 'default' },
-  reuniao:    { label: 'Reunião',    variant: 'default' },
-  convertido: { label: 'Convertido', variant: 'default' },
-  perdido:    { label: 'Perdido',    variant: 'destructive' },
+const config: Record<PipelineStatus, { label: string }> = {
+  novo:       { label: 'Novo' },
+  contatado:  { label: 'Contatado' },
+  respondeu:  { label: 'Respondeu' },
+  reuniao:    { label: 'Reunião' },
+  convertido: { label: 'Convertido' },
+  perdido:    { label: 'Perdido' },
 }
 
 const colors: Record<PipelineStatus, string> = {
