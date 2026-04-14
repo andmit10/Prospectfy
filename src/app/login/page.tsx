@@ -1,59 +1,64 @@
 import { LoginForm } from '@/components/auth/login-form'
+import { Zap } from 'lucide-react'
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex">
-      {/* Left — branding panel */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-primary p-12 text-primary-foreground">
-        <div>
-          <span className="text-2xl font-bold tracking-tight">Orbya</span>
-        </div>
-        <div className="space-y-4">
-          <h2 className="text-4xl font-bold leading-tight">
-            Prospecção B2B via WhatsApp com IA
-          </h2>
-          <p className="text-primary-foreground/70 text-lg">
-            Importe seus leads, configure a cadência e deixe o agente de IA prospectar enquanto você fecha negócios.
-          </p>
-          <ul className="space-y-2 text-primary-foreground/80 text-sm">
-            {[
-              'Envio automático via Directfy',
-              'Personalização com Claude AI',
-              'Pipeline visual com drag-and-drop',
-              'Métricas em tempo real',
-            ].map((item) => (
-              <li key={item} className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary-foreground/60" />
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-        <p className="text-xs text-primary-foreground/40">
-          © {new Date().getFullYear()} Orbya — Plataforma de Prospecção Inteligente
-        </p>
-      </div>
-
-      {/* Right — auth form */}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 bg-background">
-        <div className="w-full max-w-sm">
-          <div className="mb-8 text-center lg:hidden">
-            <h1 className="text-2xl font-bold">Orbya</h1>
+    <div
+      className="min-h-screen flex items-center justify-center px-4 py-12"
+      style={{ backgroundColor: '#0A0A0A' }}
+    >
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="flex flex-col items-center mb-8 gap-3">
+          <div
+            className="flex h-12 w-12 items-center justify-center rounded-xl"
+            style={{ backgroundColor: '#00D26A' }}
+          >
+            <Zap className="h-6 w-6" style={{ color: '#0A0A0A' }} />
           </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#F0F0F0' }}>
+              Prospectfy
+            </h1>
+            <p className="text-sm mt-1" style={{ color: '#888888' }}>
+              Prospecção inteligente com IA
+            </p>
+          </div>
+        </div>
+
+        {/* Card */}
+        <div
+          className="rounded-xl p-6"
+          style={{
+            backgroundColor: '#141414',
+            border: '1px solid #1E1E1E',
+          }}
+        >
           <div className="mb-6">
-            <h2 className="text-xl font-semibold">Entrar na sua conta</h2>
-            <p className="text-muted-foreground text-sm mt-1">
+            <h2 className="text-lg font-semibold" style={{ color: '#F0F0F0' }}>
+              Entrar na sua conta
+            </h2>
+            <p className="text-sm mt-1" style={{ color: '#888888' }}>
               Use magic link ou Google para acessar
             </p>
           </div>
           <LoginForm />
-          <p className="mt-6 text-center text-xs text-muted-foreground">
-            Não tem conta?{' '}
-            <a href="mailto:contato@orbya.com.br" className="text-primary hover:underline">
-              Fale com a gente
-            </a>
-          </p>
         </div>
+
+        <p className="mt-5 text-center text-xs" style={{ color: '#888888' }}>
+          Não tem conta?{' '}
+          <a
+            href="mailto:contato@prospectfy.com.br"
+            className="hover:underline transition-colors"
+            style={{ color: '#00D26A' }}
+          >
+            Fale com a gente
+          </a>
+        </p>
+
+        <p className="mt-4 text-center text-xs" style={{ color: '#444444' }}>
+          © {new Date().getFullYear()} Prospectfy — Plataforma de Prospecção Inteligente
+        </p>
       </div>
     </div>
   )

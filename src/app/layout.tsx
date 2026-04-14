@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Orbya — Prospecção Inteligente',
+  title: 'Prospectfy — Prospecção Inteligente',
   description: 'Plataforma de prospecção B2B WhatsApp-first para PMEs brasileiras',
 }
 

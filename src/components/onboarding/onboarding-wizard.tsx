@@ -61,7 +61,7 @@ export function OnboardingWizard() {
   async function handleFinish() {
     try {
       await updateProfile.mutateAsync({ onboarding_completed: true })
-      toast.success('Configuração concluída! Bem-vindo ao Orbya.')
+      toast.success('Configuração concluída! Bem-vindo ao Prospectfy.')
       router.push('/dashboard')
       router.refresh()
     } catch (err: unknown) {
