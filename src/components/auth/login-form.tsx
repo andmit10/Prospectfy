@@ -22,6 +22,7 @@ export function LoginForm() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const supabase = createClient()
 
@@ -50,6 +51,10 @@ export function LoginForm() {
     e.preventDefault()
     if (password.length < 6) {
       toast.error('A senha deve ter pelo menos 6 caracteres.')
+      return
+    }
+    if (password !== confirmPassword) {
+      toast.error('As senhas não coincidem.')
       return
     }
     setLoading(true)
@@ -213,6 +218,22 @@ export function LoginForm() {
                 autoComplete="new-password"
                 minLength={6}
               />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="confirm-password">Confirmar senha</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                placeholder="Repita a senha"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                autoComplete="new-password"
+                className={confirmPassword && confirmPassword !== password ? 'border-destructive focus-visible:ring-destructive' : ''}
+              />
+              {confirmPassword && confirmPassword !== password && (
+                <p className="text-xs text-destructive">As senhas não coincidem</p>
+              )}
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Criando conta...' : 'Criar conta'}
