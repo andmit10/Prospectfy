@@ -6,7 +6,8 @@ const serverSchema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
   DIRECTFY_API_URL: z.string().url().default('https://api.directfy.com'),
-  REDIS_URL: z.string().url().optional(),
+  DIRECTFY_WEBHOOK_SECRET: z.string().optional(),
+  REDIS_URL: z.string().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 })
 
@@ -23,6 +24,7 @@ export const serverEnv = serverSchema.parse({
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
   DIRECTFY_API_URL: process.env.DIRECTFY_API_URL,
+  DIRECTFY_WEBHOOK_SECRET: process.env.DIRECTFY_WEBHOOK_SECRET,
   REDIS_URL: process.env.REDIS_URL,
   NODE_ENV: process.env.NODE_ENV,
 })
