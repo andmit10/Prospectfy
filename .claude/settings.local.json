@@ -14,7 +14,11 @@
       "Bash(npx shadcn@4.2.0 add form)",
       "Bash(git config:*)",
       "Bash(node -e \"const s = require\\('stripe'\\); console.log\\(s.LATEST_API_VERSION\\)\")",
-      "Bash(node -e \"const Stripe = require\\('stripe'\\); const s = new Stripe\\('sk_test_dummy'\\); console.log\\(Stripe.LATEST_API_VERSION\\)\")"
+      "Bash(node -e \"const Stripe = require\\('stripe'\\); const s = new Stripe\\('sk_test_dummy'\\); console.log\\(Stripe.LATEST_API_VERSION\\)\")",
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\" && head -5 {}')",
+      "Bash(node -e \"require\\('date-fns'\\)\")",
+      "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force\")",
+      "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item -Recurse -Force 'C:\\\\Users\\\\amitk\\\\OneDrive\\\\Documentos\\\\Antigravity\\\\Prospectfy\\\\orbya-saas\\\\.next' -ErrorAction SilentlyContinue; Write-Host 'Done'\")"
     ]
   }
 }
