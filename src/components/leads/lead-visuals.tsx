@@ -22,7 +22,7 @@ export const FONTES: ReadonlyArray<{
   color: string
   icon: LucideIcon
 }> = [
-  { id: 'google_maps', label: 'Google Maps', color: '#EA4335', icon: MapPin },
+  { id: 'google_maps', label: 'Google', color: '#EA4335', icon: MapPin },
   { id: 'quadro_societario', label: 'Quadro societário', color: 'var(--primary)', icon: Briefcase },
   { id: 'linkedin', label: 'LinkedIn', color: '#0A66C2', icon: Link2 },
   { id: 'hunter', label: 'Hunter.io', color: '#FF6B35', icon: AtSign },
