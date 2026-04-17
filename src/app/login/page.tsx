@@ -14,7 +14,7 @@ export default function LoginPage() {
               className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]"
               style={{ fontFamily: 'var(--font-display), var(--font-sans), system-ui, sans-serif', letterSpacing: '-0.03em' }}
             >
-              convertafy
+              Prospectfy
             </h1>
             <p className="text-sm mt-1 text-[var(--text-secondary)]">
               Prospecção inteligente com IA
@@ -40,7 +40,7 @@ export default function LoginPage() {
         <p className="mt-5 text-center text-xs text-[var(--text-secondary)]">
           Não tem conta?{' '}
           <a
-            href="mailto:contato@convertafy.com.br"
+            href="mailto:contato@prospectfy.com.br"
             className="hover:underline transition-colors text-[var(--primary)]"
           >
             Fale com a gente
@@ -48,7 +48,7 @@ export default function LoginPage() {
         </p>
 
         <p className="mt-4 text-center text-xs text-[var(--text-tertiary)]">
-          © {new Date().getFullYear()} convertafy — Plataforma de Prospecção Inteligente
+          © {new Date().getFullYear()} Prospectfy — Plataforma de Prospecção Inteligente
         </p>
       </div>
     </div>

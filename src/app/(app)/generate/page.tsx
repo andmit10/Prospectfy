@@ -2,7 +2,7 @@ import { LeadGenerator } from '@/components/generate/lead-generator'
 import { PowerCards } from '@/components/generate/power-cards'
 import { Sparkles } from 'lucide-react'
 
-export const metadata = { title: 'Gerar Leads | convertafy' }
+export const metadata = { title: 'Gerar Leads | Prospectfy' }
 
 export default function GeneratePage() {
   return (

@@ -22,7 +22,7 @@ const spaceGrotesk = Space_Grotesk({
 })
 
 export const metadata: Metadata = {
-  title: 'convertafy — Prospecção Inteligente',
+  title: 'Prospectfy — Prospecção Inteligente',
   description: 'Plataforma de prospecção B2B WhatsApp-first para PMEs brasileiras',
 }
 

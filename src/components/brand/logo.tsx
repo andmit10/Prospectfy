@@ -8,13 +8,15 @@ type LogoProps = {
 }
 
 /**
- * convertafy brand mark — stylized "C" with upward-trending arrow forming
+ * Prospectfy brand mark — stylized "C" with upward-trending arrow forming
  * a growth curve inside. Blue gradient (Windows-style). Uses currentColor
  * for mono variant so it can be tinted via `color:` prop.
+ * NOTE: the geometry is still a "C" from the legacy Convertafy identity —
+ * track a redesign task when the new visual direction lands.
  */
-export function Logo({ size = 32, className, monochrome = false, title = 'convertafy' }: LogoProps) {
-  const gradientId = 'convertafy-logo-gradient'
-  const arrowGradientId = 'convertafy-arrow-gradient'
+export function Logo({ size = 32, className, monochrome = false, title = 'Prospectfy' }: LogoProps) {
+  const gradientId = 'prospectfy-logo-gradient'
+  const arrowGradientId = 'prospectfy-arrow-gradient'
 
   return (
     <svg

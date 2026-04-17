@@ -118,7 +118,7 @@ export function Sidebar() {
                 lineHeight: 1,
               }}
             >
-              convertafy
+              Prospectfy
             </span>
             <span
               className="mt-1 text-[10px] font-medium text-[var(--text-tertiary)] truncate"

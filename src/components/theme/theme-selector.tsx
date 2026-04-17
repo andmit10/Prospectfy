@@ -79,7 +79,7 @@ export function ThemeSelector() {
       <div>
         <h3 className="text-sm font-semibold text-[var(--text-primary)]">Aparência</h3>
         <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
-          Escolha como o convertafy aparece no seu navegador
+          Escolha como o Prospectfy aparece no seu navegador
         </p>
       </div>
 
