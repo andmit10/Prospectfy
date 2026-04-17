@@ -1,25 +1,13 @@
 import type { Metadata } from 'next'
 import Script from 'next/script'
-import { Geist, Geist_Mono, Space_Grotesk } from 'next/font/google'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { themeScript } from '@/components/theme/theme-provider'
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-})
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-})
-
-const spaceGrotesk = Space_Grotesk({
-  variable: '--font-display',
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-})
+// System-font stack (Arial-first). Dropping next/font/google imports removes
+// the Geist/Space Grotesk network fetches and the CLS they caused on slow
+// connections. Tester feedback: Arial is the familiar, trustworthy default
+// for Brazilian PME audiences.
 
 export const metadata: Metadata = {
   title: 'Prospectfy — Prospecção Inteligente',
@@ -32,10 +20,10 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} h-full antialiased`}
+      className="h-full antialiased"
       suppressHydrationWarning
     >
-      <body className="h-full bg-background text-foreground">
+      <body className="h-full bg-background text-foreground font-sans">
         {/*
           Theme bootstrap — runs BEFORE hydration so the HTML gets the right
           `light` / `dark` class on first paint. Uses next/script with

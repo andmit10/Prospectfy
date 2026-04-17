@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-mono: 'Courier New', ui-monospace, SFMono-Regular, monospace;
+  --font-heading: Arial, Helvetica, sans-serif;
 
   /* Surface layers — elevation system */
   --color-surface-0: var(--surface-0);
@@ -81,6 +81,13 @@
 }
 
 :root {
+  /* Font stack — Arial first. Inline styles across the app reference these
+     variables, so overriding them here propagates automatically. */
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-display: Arial, Helvetica, sans-serif;
+  --font-geist-sans: Arial, Helvetica, sans-serif;
+  --font-geist-mono: 'Courier New', ui-monospace, SFMono-Regular, monospace;
+
   /* Base */
   --background: #0A0A0A;
   --foreground: #F0F0F0;
@@ -391,9 +398,9 @@
     -webkit-text-fill-color: transparent;
   }
 
-  /* Display font utility (Space Grotesk) */
+  /* Display font utility — slightly tighter tracking on Arial for headings. */
   .font-display {
-    font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+    font-family: Arial, Helvetica, sans-serif;
     letter-spacing: -0.02em;
   }
 

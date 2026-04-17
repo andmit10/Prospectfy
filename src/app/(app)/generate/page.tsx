@@ -6,7 +6,7 @@ export const metadata = { title: 'Gerar Leads | Prospectfy' }
 
 export default function GeneratePage() {
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto px-1">
+    <div className="flex flex-col gap-6 max-w-7xl mx-auto px-1">
       {/* Header */}
       <div className="animate-fade-in-up">
         <div className="flex items-center gap-2.5 mb-1.5">
