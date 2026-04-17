@@ -69,8 +69,32 @@ export function OnboardingWizard() {
     }
   }
 
+  const progressPct = Math.round(((step + 1) / STEPS.length) * 100)
+
   return (
     <>
+      {/* Progress — gives users a sense of how close they are to finishing. */}
+      <div className="mx-auto mb-4 max-w-md space-y-1.5">
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
+            Passo {step + 1} de {STEPS.length}
+          </span>
+          <span>Leva cerca de 2 min</span>
+        </div>
+        <div
+          className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-2)]"
+          role="progressbar"
+          aria-valuenow={progressPct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-500"
+            style={{ width: `${progressPct}%` }}
+          />
+        </div>
+      </div>
+
       {/* Stepper */}
       <nav className="flex justify-center gap-6 mb-6">
         {STEPS.map(({ label, icon: Icon }, i) => (

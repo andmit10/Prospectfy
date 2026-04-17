@@ -59,6 +59,7 @@ import Link from 'next/link'
 import { ImportCsvDialog } from './import-csv-dialog'
 import { AssignPipelineDialog } from './assign-pipeline-dialog'
 import { LeadDetailPanel } from './lead-detail-panel'
+import { LeadMobileCards } from './lead-mobile-cards'
 import { toast } from 'sonner'
 
 const PIPELINE_OPTIONS: { value: PipelineStatus; label: string }[] = [
@@ -694,9 +695,17 @@ export function LeadsTable() {
         </div>
       )}
 
+      {/* Mobile (<md): card list. Bulk actions / sort hidden below md — revisit
+          if tablet usage grows beyond occasional. */}
+      <LeadMobileCards
+        leads={data?.leads ?? []}
+        isLoading={isLoading}
+        pipelineIdMap={pipelineIdMap}
+      />
+
       {/* Table — bounded viewport so H/V scrollbars sit inside, not at page bottom.
           Sticky header + sticky select+expand columns keep context while scrolling. */}
-      <div className="rounded-md border overflow-auto max-h-[calc(100vh-260px)]">
+      <div className="hidden md:block rounded-md border overflow-auto max-h-[calc(100vh-260px)]">
         <Table className="min-w-[1400px] [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-[var(--surface-1)]">
           <TableHeader>
             {table.getHeaderGroups().map((hg) => (

@@ -1,8 +1,11 @@
 'use client'
 
+import Link from 'next/link'
 import { trpc } from '@/lib/trpc-client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Activity, Sparkles } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 
 const tipoLabel: Record<string, string> = {
   enviado:   'Mensagem enviada para',
@@ -42,9 +45,29 @@ export function RecentActivity() {
         {isLoading ? (
           [1, 2, 3].map((i) => <Skeleton key={i} className="h-10" />)
         ) : !data || data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhuma atividade ainda. Ative uma campanha para começar.
-          </p>
+          <EmptyState
+            icon={Activity}
+            title="Nenhuma atividade ainda"
+            description="Gere seus primeiros leads e ative uma campanha para o agente começar a prospectar via WhatsApp."
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Link
+                  href="/generate"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  Gerar leads
+                </Link>
+                <Link
+                  href="/campaigns/new"
+                  className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--surface-3)]"
+                >
+                  Criar campanha
+                </Link>
+              </div>
+            }
+            className="py-8"
+          />
         ) : (
           data.map((item) => {
             const lead = item.leads as { decisor_nome: string; empresa_nome: string } | null | undefined

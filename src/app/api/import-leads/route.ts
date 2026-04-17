@@ -1,7 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolveCurrentOrgId } from '@/lib/org-context'
+import { childLogger } from '@/lib/logger'
 import { z } from 'zod'
+
+const log = childLogger('api:import-leads')
+
+// Upper bound per request. Bigger files are processed in multiple calls by the
+// importer dialog. 1000 keeps a single Postgres INSERT well under the
+// statement-size limits while comfortably covering the PRD target (500 rows
+// in under 30s).
+const MAX_ROWS_PER_REQUEST = 1000
+const INSERT_CHUNK_SIZE = 500
 
 const leadRowSchema = z.object({
   // Core
@@ -58,6 +68,7 @@ const inputSchema = z.object({
 })
 
 export async function POST(request: NextRequest) {
+  const t0 = Date.now()
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -75,6 +86,15 @@ export async function POST(request: NextRequest) {
     const input = inputSchema.safeParse(body)
     if (!input.success) {
       return NextResponse.json({ error: 'Dados inválidos' }, { status: 400 })
+    }
+
+    if (input.data.leads.length > MAX_ROWS_PER_REQUEST) {
+      return NextResponse.json(
+        {
+          error: `Importe no máximo ${MAX_ROWS_PER_REQUEST} leads por requisição.`,
+        },
+        { status: 413 }
+      )
     }
 
     const rows = input.data.leads.map((lead) => ({
@@ -144,7 +164,12 @@ export async function POST(request: NextRequest) {
     const skipped = rows.length - newRows.length
 
     if (newRows.length === 0) {
-      return NextResponse.json({ imported: 0, skipped, total: rows.length })
+      return NextResponse.json({
+        imported: 0,
+        skipped,
+        total: rows.length,
+        durationMs: Date.now() - t0,
+      })
     }
 
     // Dedup is handled by the pre-filter above. We intentionally avoid .upsert()
@@ -152,22 +177,46 @@ export async function POST(request: NextRequest) {
     // (`where deleted_at is null`) — Postgres rejects ON CONFLICT targets that
     // don't match a full constraint, throwing "there is no unique or exclusion
     // constraint matching the ON CONFLICT specification".
-    const { data, error } = await supabase
-      .from('leads')
-      .insert(newRows)
-      .select()
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    //
+    // We chunk large inserts so a failure mid-way doesn't roll back the whole
+    // batch (PostgREST inserts are statement-scoped but splitting also keeps
+    // request payloads comfortably under Supabase's body limits for 500+ rows).
+    // `select('id')` instead of `.select()` — we only need the count on the
+    // client, so skipping the full round-trip shaves noticeable latency at
+    // 500 rows.
+    let imported = 0
+    for (let i = 0; i < newRows.length; i += INSERT_CHUNK_SIZE) {
+      const chunk = newRows.slice(i, i + INSERT_CHUNK_SIZE)
+      const { data, error } = await supabase.from('leads').insert(chunk).select('id')
+      if (error) {
+        log.error('insert chunk failed', {
+          orgId,
+          chunkStart: i,
+          chunkSize: chunk.length,
+          error: error.message,
+        })
+        return NextResponse.json(
+          { error: error.message, imported, skipped },
+          { status: 500 }
+        )
+      }
+      imported += data?.length ?? 0
     }
 
+    const durationMs = Date.now() - t0
+    log.info('import complete', { orgId, imported, skipped, total: rows.length, durationMs })
+
     return NextResponse.json({
-      imported: data?.length ?? 0,
+      imported,
       skipped,
       total: rows.length,
+      durationMs,
     })
   } catch (err) {
-    console.error('import-leads error:', err)
+    log.error('import-leads failed', {
+      error: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - t0,
+    })
     return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
   }
 }
