@@ -9,6 +9,7 @@ import { registerProvider } from './dispatcher'
 // WhatsApp
 import { directfyProvider } from './providers/whatsapp/directfy'
 import { evolutionProvider } from './providers/whatsapp/evolution'
+import { evolutionGoProvider } from './providers/whatsapp/evolution-go'
 import { zapiProvider } from './providers/whatsapp/zapi'
 import { genericWebhookProvider } from './providers/whatsapp/generic-webhook'
 
@@ -30,6 +31,7 @@ export function registerAllProviders(): void {
   registered = true
   registerProvider(directfyProvider)
   registerProvider(evolutionProvider)
+  registerProvider(evolutionGoProvider)
   registerProvider(zapiProvider)
   registerProvider(genericWebhookProvider)
   registerProvider(resendProvider)
@@ -117,6 +119,61 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/whatsapp/evolution',
+  },
+  {
+    id: 'evolution_go',
+    channel: 'whatsapp',
+    name: 'Evolution Go (self-host)',
+    description:
+      'Reescrita em Go do Evolution. Endpoints diferentes (POST /send/text). Self-host em VPS próprio.',
+    risk:
+      'Usa API não-oficial do WhatsApp. Mesmo risco de ban da Evolution clássica.',
+    fields: [
+      {
+        key: 'baseUrl',
+        label: 'URL do servidor',
+        type: 'url',
+        required: true,
+        placeholder: 'https://seu-servidor:443',
+      },
+      {
+        key: 'instanceToken',
+        label: 'Token da instância (UUID)',
+        type: 'password',
+        required: true,
+        help: 'Token gerado quando você criou a instância no painel Evolution Go.',
+      },
+      {
+        key: 'instanceName',
+        label: 'Nome da instância',
+        type: 'text',
+        required: true,
+        placeholder: 'Labfy',
+      },
+      {
+        key: 'instanceId',
+        label: 'ID da instância (UUID, opcional)',
+        type: 'text',
+        required: false,
+        help: 'Necessário para alguns endpoints administrativos (header instanceId).',
+      },
+      {
+        key: 'globalApiKey',
+        label: 'GLOBAL_API_KEY (opcional)',
+        type: 'password',
+        required: false,
+        help: 'Apenas se for configurar webhook automaticamente via /instance/connect.',
+      },
+      {
+        key: 'ignoreTls',
+        label: 'Ignorar verificação TLS (cert autoassinado)',
+        type: 'checkbox',
+        required: false,
+        help: 'Marque APENAS se o servidor usa cert autoassinado (ex: HTTPS num IP cru).',
+      },
+    ],
+    hasWebhook: true,
+    webhookPath: '/api/webhooks/channels/whatsapp/evolution_go',
   },
   {
     id: 'zapi',

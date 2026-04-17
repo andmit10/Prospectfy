@@ -297,6 +297,7 @@ export const adminRouter = router({
           .enum(['trial', 'starter', 'pro', 'business', 'agency', 'enterprise'])
           .optional(),
         trial_ends_at: z.string().datetime().nullable().optional(),
+        leads_generated_limit: z.number().int().min(0).max(1_000_000).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -310,6 +311,8 @@ export const adminRouter = router({
         patch.billing_email = input.billing_email || null
       if (input.plan !== undefined) patch.plan = input.plan
       if (input.trial_ends_at !== undefined) patch.trial_ends_at = input.trial_ends_at
+      if (input.leads_generated_limit !== undefined)
+        patch.leads_generated_limit = input.leads_generated_limit
 
       const { error } = await supabase
         .from('organizations')

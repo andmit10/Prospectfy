@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { handleWebhook, type Channel } from '@/lib/channels'
 import { onInboundMessage } from '@/lib/pipeline/auto-progression'
 import { createServiceClient } from '@/lib/supabase/service'
+import { applyEvolutionGoLifecycle } from './evolution-go-lifecycle'
 
 /**
  * Unified channel webhook entrypoint. The path is:
@@ -50,6 +51,16 @@ export async function POST(
   // Read raw body once — we pass the string to the provider for signature
   // verification. Never .json() here; that re-serializes and breaks HMAC.
   const rawBody = await request.text()
+
+  // Evolution Go lifecycle events (QRCode, Connected, LoggedOut) update the
+  // integration row directly — they're orthogonal to the message-tracking
+  // path that handleWebhook covers. Returning early when the event was a
+  // lifecycle one keeps the message handler from running on payloads that
+  // don't carry a message at all.
+  if (channel === 'whatsapp' && provider === 'evolution_go' && integrationId) {
+    const handled = await applyEvolutionGoLifecycle({ integrationId, rawBody })
+    if (handled) return NextResponse.json({ processed: true, lifecycle: handled })
+  }
 
   try {
     const result = await handleWebhook({

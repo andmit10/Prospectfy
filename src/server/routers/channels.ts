@@ -10,6 +10,13 @@ import {
   PROVIDER_CATALOG,
   type Channel,
 } from '@/lib/channels'
+import {
+  createInstance as evoCreateInstance,
+  connectInstance as evoConnectInstance,
+  disconnectInstance as evoDisconnectInstance,
+} from '@/lib/channels/providers/whatsapp/evolution-go-admin'
+import { serverEnv } from '@/lib/env.server'
+import { createServiceClient } from '@/lib/supabase/service'
 
 /**
  * Channels router — manage `channel_integrations` + send test messages.
@@ -246,6 +253,210 @@ export const channelsRouter = router({
         })
       }
       return outcome
+    }),
+
+  /**
+   * Provision a WhatsApp instance on the SHARED Evolution Go server.
+   *
+   * Flow:
+   *   1. Validate plan limit: count(channel_integrations where channel='whatsapp' and status != 'disconnected')
+   *      must be < plan_catalog.max_channels. Disconnected slots don't count.
+   *   2. Validate name uniqueness within the org (slug-friendly).
+   *   3. Call Evolution Go: POST /instance/create → instanceId + token.
+   *   4. Insert channel_integrations row with status='disconnected', metadata={ instance_id }.
+   *   5. Call Evolution Go: POST /instance/connect with our webhook URL → triggers QRCode event.
+   *   6. The webhook handler will populate metadata.qr_code and flip status to 'active' on Connected.
+   *
+   * Returns the new integration id so the UI can poll getQRCode.
+   */
+  provisionWhatsapp: adminProcedure
+    .input(
+      z.object({
+        instanceName: z
+          .string()
+          .min(3)
+          .max(40)
+          .regex(/^[a-zA-Z0-9_-]+$/, 'Use apenas letras, números, _ ou -'),
+        displayName: z.string().min(2).max(80),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!serverEnv.EVOLUTION_GO_SHARED_BASE_URL || !serverEnv.EVOLUTION_GO_SHARED_GLOBAL_API_KEY) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'Servidor WhatsApp compartilhado não configurado. Contate o suporte.',
+        })
+      }
+
+      // ── 1. Plan limit check ────────────────────────────────────────────
+      const { data: org } = await ctx.supabase
+        .from('organizations')
+        .select('plan, slug')
+        .eq('id', ctx.orgId)
+        .single()
+
+      const [{ data: planRow }, { count: existingCount }] = await Promise.all([
+        ctx.supabase
+          .from('plan_catalog')
+          .select('max_channels')
+          .eq('plan', (org?.plan as string) ?? 'trial')
+          .maybeSingle(),
+        ctx.supabase
+          .from('channel_integrations')
+          .select('id', { head: true, count: 'exact' })
+          .eq('organization_id', ctx.orgId)
+          .eq('channel', 'whatsapp')
+          .neq('status', 'disconnected'),
+      ])
+
+      const max = (planRow?.max_channels as number | null) ?? 1
+      if ((existingCount ?? 0) >= max) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: `Limite do plano atingido: ${max} WhatsApp${max === 1 ? '' : 's'}. Faça upgrade para conectar mais números.`,
+        })
+      }
+
+      // ── 2. Uniqueness check (Evolution Go server names are global per server) ──
+      // We prefix the org slug to reduce collision risk across tenants.
+      const baseSlug = (org?.slug as string | undefined) ?? 'org'
+      const fullName = `${baseSlug}_${input.instanceName}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)
+
+      // ── 3. Create instance on Evolution Go ─────────────────────────────
+      let created: { id: string; token: string; name: string }
+      try {
+        created = await evoCreateInstance(fullName)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        // 409 collision → instruct user to pick a different name
+        if (/409/.test(msg)) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Já existe uma instância com esse nome. Escolha outro.',
+          })
+        }
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: msg })
+      }
+
+      // ── 4. Insert integration row (status starts as 'disconnected'; webhook flips to 'active') ──
+      const integrationConfig = {
+        baseUrl: serverEnv.EVOLUTION_GO_SHARED_BASE_URL,
+        instanceToken: created.token,
+        instanceName: created.name,
+        instanceId: created.id,
+        ignoreTls: serverEnv.EVOLUTION_GO_SHARED_IGNORE_TLS,
+      }
+      const encrypted = encryptConfig(integrationConfig)
+
+      const { data: newRow, error: insertErr } = await ctx.supabase
+        .from('channel_integrations')
+        .insert({
+          organization_id: ctx.orgId,
+          channel: 'whatsapp',
+          provider: 'evolution_go',
+          display_name: input.displayName,
+          config: encrypted,
+          status: 'disconnected',
+          is_default: (existingCount ?? 0) === 0,
+          metadata: { instance_id: created.id, provisioned_at: new Date().toISOString() },
+          created_by: ctx.user.id,
+        })
+        .select('id')
+        .single()
+
+      if (insertErr || !newRow) {
+        // Rollback the instance on Evolution Go to avoid orphans.
+        const { deleteInstance } = await import('@/lib/channels/providers/whatsapp/evolution-go-admin')
+        await deleteInstance(created.id).catch(() => {})
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: insertErr?.message ?? 'Falha ao gravar integração',
+        })
+      }
+
+      // ── 5. Configure webhook + start pairing ────────────────────────────
+      const webhookUrl = `${serverEnv.NEXT_PUBLIC_APP_URL}/api/webhooks/channels/whatsapp/evolution_go?integration=${newRow.id}`
+      try {
+        await evoConnectInstance({ instanceId: created.id, webhookUrl })
+      } catch (err) {
+        // Roll back DB + remote instance — leaving a half-configured row is worse.
+        await ctx.supabase.from('channel_integrations').delete().eq('id', newRow.id)
+        const { deleteInstance } = await import('@/lib/channels/providers/whatsapp/evolution-go-admin')
+        await deleteInstance(created.id).catch(() => {})
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      return {
+        integrationId: newRow.id as string,
+        instanceId: created.id,
+      }
+    }),
+
+  /** Poll endpoint for the live QR code while the user pairs. */
+  getWhatsappQR: orgProcedure
+    .input(z.object({ integrationId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('channel_integrations')
+        .select('status, metadata, connected_at')
+        .eq('id', input.integrationId)
+        .eq('organization_id', ctx.orgId)
+        .single()
+      if (error || !data) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Integração não encontrada' })
+      }
+      const meta = (data.metadata as Record<string, unknown> | null) ?? {}
+      return {
+        status: data.status as 'active' | 'error' | 'disconnected',
+        connectedAt: data.connected_at as string | null,
+        qrCode: (meta.qr_code as string | null) ?? null,
+        qrUpdatedAt: (meta.qr_updated_at as string | null) ?? null,
+      }
+    }),
+
+  /** Manual disconnect — keeps the row, marks status, lets user reconnect later. */
+  disconnectWhatsapp: adminProcedure
+    .input(z.object({ integrationId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('channel_integrations')
+        .select('id, channel, provider, metadata')
+        .eq('id', input.integrationId)
+        .eq('organization_id', ctx.orgId)
+        .single()
+      if (error || !data) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Integração não encontrada' })
+      }
+      if (data.provider !== 'evolution_go') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Disconnect automático só está disponível para Evolution Go.',
+        })
+      }
+      const instanceId = (data.metadata as Record<string, unknown> | null)?.instance_id as
+        | string
+        | undefined
+      if (instanceId) {
+        await evoDisconnectInstance(instanceId).catch(() => {
+          // Best-effort: server side may already be gone. We still mark local state.
+        })
+      }
+      const supabase = createServiceClient()
+      await supabase
+        .from('channel_integrations')
+        .update({
+          status: 'disconnected',
+          metadata: {
+            ...((data.metadata as Record<string, unknown> | null) ?? {}),
+            disconnected_at: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', input.integrationId)
+      return { success: true }
     }),
 
   /** List recent channel_messages for the active org. */

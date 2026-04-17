@@ -78,7 +78,19 @@
       "Bash(npx supabase *)",
       "mcp__aaad95bf-8543-4f86-8672-66d5ce0b87a4__list_tables",
       "Bash(node -e \"const L=require\\('lucide-react'\\); console.log\\(Object.keys\\(L\\).filter\\(k=>k.toLowerCase\\(\\).includes\\('linkedin'\\)||k.includes\\('Share'\\)||k.includes\\('Net'\\)||k.includes\\('Brief'\\)\\).slice\\(0,20\\)\\);\")",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(curl -s http://localhost:3100 -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(tasklist //FI \"IMAGENAME eq node.exe\")",
+      "Bash(curl -s -o /dev/null -w \"port 3100: %{http_code}\\\\n\" http://localhost:3100)",
+      "Bash(npx vitest *)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")",
+      "Bash(supabase --version)",
+      "Bash(curl -s -i -o - \"https://bmgebyimmwnfmkczyaqb.supabase.co/auth/v1/authorize?provider=google&redirect_to=http%3A%2F%2Flocalhost%3A3000%2Fauth%2Fcallback&code_challenge=eFrdfXmNy_jJJwJkr27O80MQqQWKEmH7ZfcYXBsPHQ4&code_challenge_method=s256\" -H \"apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJtZ2VieWltbXduZm1rY3p5YXFiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYxNjkzNDMsImV4cCI6MjA5MTc0NTM0M30.L1sRu_DmZYg_8MLj1FRRuI7fLH7r-Oj5_SkvNpA3INQ\" --max-redirs 0)",
+      "Bash(python -c ' *)",
+      "Bash(node -e ' *)",
+      "Bash(node \"C:/Users/amitk/OneDrive/Documentos/Antigravity/Prospectfy/orbya-saas/tmp-analyze-advisors.js\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const s=fs.readFileSync\\('C:/Users/amitk/OneDrive/Documentos/Antigravity/Prospectfy/orbya-saas/tmp-advisors-out.txt','utf8'\\);console.log\\('OUT LEN:', s.length\\);\")"
     ]
   }
 }

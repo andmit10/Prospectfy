@@ -308,6 +308,23 @@ export function OrgDetail({ orgId }: { orgId: string }) {
             }
           />
           <DtDd
+            label="Limite de leads (IA)"
+            value={
+              <span title="NULL = usa o limite do plano. Override = força o valor mostrado.">
+                <strong>{(org.leads_generated_count as number) ?? 0}</strong>
+                {' / '}
+                {org.leads_generated_limit != null ? (
+                  <>
+                    <strong>{org.leads_generated_limit as number}</strong>
+                    <span className="ml-1 text-[10px] text-amber-600">override</span>
+                  </>
+                ) : (
+                  <span className="text-[var(--text-tertiary)]">plano</span>
+                )}
+              </span>
+            }
+          />
+          <DtDd
             label="Stripe customer"
             value={(org.stripe_customer_id as string) ?? '—'}
             mono
@@ -512,6 +529,10 @@ function OrgEditForm({
   const [slug, setSlug] = useState((org.slug as string) ?? '')
   const [billingEmail, setBillingEmail] = useState((org.billing_email as string) ?? '')
   const [plan, setPlan] = useState<string>((org.plan as string) ?? 'trial')
+  const initialLimit = org.leads_generated_limit as number | null | undefined
+  const [leadsLimit, setLeadsLimit] = useState<string>(
+    initialLimit == null ? '' : String(initialLimit)
+  )
 
   const update = trpc.admin.updateOrg.useMutation({
     onSuccess: () => {
@@ -580,6 +601,23 @@ function OrgEditForm({
             </SelectContent>
           </Select>
         </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">
+            Limite de leads gerados pela IA (override)
+          </label>
+          <Input
+            type="number"
+            min={0}
+            step={1}
+            value={leadsLimit}
+            onChange={(e) => setLeadsLimit(e.target.value)}
+            placeholder="vazio = usa o limite do plano"
+          />
+          <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">
+            Deixe em branco para usar o limite do plano. Preencha para forçar um valor específico
+            (ex: 200 para liberar mais leads num trial).
+          </p>
+        </div>
       </div>
 
       <div className="mt-4 flex justify-end gap-2">
@@ -594,6 +632,8 @@ function OrgEditForm({
               slug,
               billing_email: billingEmail,
               plan: plan as 'trial' | 'starter' | 'pro' | 'business' | 'agency' | 'enterprise',
+              leads_generated_limit:
+                leadsLimit.trim() === '' ? null : Math.max(0, Number(leadsLimit)),
             })
           }
           disabled={update.isPending || name.length < 2}

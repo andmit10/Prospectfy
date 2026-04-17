@@ -149,7 +149,7 @@ export async function POST(request: NextRequest) {
           sendEvent(controller, encoder, {
             type: 'error',
             reason: 'trial_quota',
-            message: `Você já gerou os ${TRIAL_LEAD_LIMIT} leads incluídos no trial. Faça upgrade para continuar.`,
+            message: `Você já gerou os ${trial.leadsLimit} leads incluídos no trial. Faça upgrade para continuar.`,
           })
           controller.close()
           return
@@ -167,7 +167,7 @@ export async function POST(request: NextRequest) {
         // Trim the requested quantity to the remaining trial allowance.
         const remainingAllowance =
           trial.plan === 'trial'
-            ? Math.max(0, TRIAL_LEAD_LIMIT - trial.leadsGenerated)
+            ? Math.max(0, trial.leadsLimit - trial.leadsGenerated)
             : Number.POSITIVE_INFINITY
         if (input.data.quantidade > remainingAllowance) {
           input.data.quantidade = remainingAllowance
@@ -500,7 +500,7 @@ REGRAS OBRIGATÓRIAS:
           trial: {
             plan: trial.plan,
             leadsGenerated: newTotal,
-            leadsLimit: TRIAL_LEAD_LIMIT,
+            leadsLimit: trial.leadsLimit,
           },
           stats: {
             emails_validados: leads.data.filter(l => l.email).length,
