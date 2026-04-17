@@ -129,7 +129,7 @@ export function OnboardingWizard() {
                     <FormItem>
                       <FormLabel>Seu nome</FormLabel>
                       <FormControl>
-                        <Input placeholder="Anderson Mitkiewicz" {...field} />
+                        <Input placeholder="Ex: Maria Silva" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -142,7 +142,7 @@ export function OnboardingWizard() {
                     <FormItem>
                       <FormLabel>Nome da empresa</FormLabel>
                       <FormControl>
-                        <Input placeholder="Labfy" {...field} />
+                        <Input placeholder="Ex: Minha Empresa Ltda" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
