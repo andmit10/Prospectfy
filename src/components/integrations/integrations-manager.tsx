@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   type LucideIcon,
 } from 'lucide-react'
+import { EvolutionGoQrDialog } from './evolution-go-qr-dialog'
 
 type Channel = 'whatsapp' | 'email' | 'linkedin' | 'instagram'
 
@@ -105,6 +106,18 @@ export function IntegrationsManager() {
   const { data: integrations, isLoading: intLoading } = trpc.channels.list.useQuery()
   const [connectTarget, setConnectTarget] = useState<CatalogEntry | null>(null)
   const [testTarget, setTestTarget] = useState<Integration | null>(null)
+  const [evoGoQrOpen, setEvoGoQrOpen] = useState(false)
+
+  // Branch the connect flow: evolution_go gets the auto-provision QR dialog
+  // (cliente nomeia → cria instância no shared VPS → escaneia QR), everyone
+  // else still uses the manual config form.
+  function openConnect(entry: CatalogEntry) {
+    if (entry.id === 'evolution_go') {
+      setEvoGoQrOpen(true)
+    } else {
+      setConnectTarget(entry)
+    }
+  }
 
   const byChannel = useMemo(() => {
     const out: Record<Channel, { catalog: CatalogEntry[]; integrations: Integration[] }> = {
@@ -161,7 +174,7 @@ export function IntegrationsManager() {
             meta={meta}
             catalog={cat}
             integrations={ints}
-            onConnect={setConnectTarget}
+            onConnect={openConnect}
             onTest={setTestTarget}
           />
         )
@@ -177,6 +190,7 @@ export function IntegrationsManager() {
         }
       />
       <TestDialog integration={testTarget} onClose={() => setTestTarget(null)} />
+      <EvolutionGoQrDialog open={evoGoQrOpen} onClose={() => setEvoGoQrOpen(false)} />
     </div>
   )
 }
