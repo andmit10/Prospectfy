@@ -3,7 +3,15 @@ import { createClient } from '@/lib/supabase/server'
 import { resolveCurrentOrgId } from '@/lib/org-context'
 import { llm } from '@/lib/llm'
 import { extractJson } from '@/lib/llm/validator'
+import {
+  getTrialStatus,
+  incrementLeadsGenerated,
+  TRIAL_LEAD_LIMIT,
+} from '@/lib/trial/limits'
+import { childLogger } from '@/lib/logger'
 import { z } from 'zod'
+
+const log = childLogger('api:generate-leads')
 
 const inputSchema = z.object({
   segmento: z.string().min(1),
@@ -96,6 +104,28 @@ export async function POST(request: NextRequest) {
           return
         }
 
+        // Trial gate — fail closed with a specific event type so the UI can
+        // show an upgrade modal instead of a generic error toast.
+        const trial = await getTrialStatus(supabase, orgId)
+        if (trial.expired) {
+          sendEvent(controller, encoder, {
+            type: 'error',
+            reason: 'trial_expired',
+            message: 'Seu trial de 7 dias acabou. Faça upgrade para continuar gerando leads.',
+          })
+          controller.close()
+          return
+        }
+        if (trial.exhausted) {
+          sendEvent(controller, encoder, {
+            type: 'error',
+            reason: 'trial_quota',
+            message: `Você já gerou os ${TRIAL_LEAD_LIMIT} leads incluídos no trial. Faça upgrade para continuar.`,
+          })
+          controller.close()
+          return
+        }
+
         // Parse input
         const body = await request.json()
         const input = inputSchema.safeParse(body)
@@ -103,6 +133,21 @@ export async function POST(request: NextRequest) {
           sendEvent(controller, encoder, { type: 'error', message: 'Dados inválidos' })
           controller.close()
           return
+        }
+
+        // Trim the requested quantity to the remaining trial allowance.
+        const remainingAllowance =
+          trial.plan === 'trial'
+            ? Math.max(0, TRIAL_LEAD_LIMIT - trial.leadsGenerated)
+            : Number.POSITIVE_INFINITY
+        if (input.data.quantidade > remainingAllowance) {
+          input.data.quantidade = remainingAllowance
+          sendEvent(controller, encoder, {
+            type: 'progress',
+            step: 'maps',
+            status: 'running',
+            message: `Trial: restam ${remainingAllowance} leads do seu limite. Gerando ${remainingAllowance}.`,
+          })
         }
 
         const {
@@ -401,11 +446,33 @@ REGRAS OBRIGATÓRIAS:
           message: `Scores calculados — média: ${Math.round(leads.data.reduce((a, l) => a + l.score, 0) / leads.data.length)}`,
         })
 
+        // Count generated leads against the trial quota. Counter increments
+        // BEFORE the import step — the user "consumed" the AI budget regardless
+        // of whether they choose to import these rows. Returning a non-zero
+        // count ensures the header badge updates on the next refetch.
+        let newTotal = trial.leadsGenerated
+        if (leads.data.length > 0 && trial.plan === 'trial') {
+          try {
+            newTotal = await incrementLeadsGenerated(supabase, orgId, leads.data.length)
+          } catch (err) {
+            log.warn('failed to increment leads_generated_count', {
+              orgId,
+              delta: leads.data.length,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+
         // Final: Send leads
         sendEvent(controller, encoder, {
           type: 'complete',
           leads: leads.data,
           total: leads.data.length,
+          trial: {
+            plan: trial.plan,
+            leadsGenerated: newTotal,
+            leadsLimit: TRIAL_LEAD_LIMIT,
+          },
           stats: {
             emails_validados: leads.data.filter(l => l.email).length,
             linkedin_encontrados: leads.data.filter(l => l.linkedin_url).length,
@@ -416,7 +483,9 @@ REGRAS OBRIGATÓRIAS:
 
         controller.close()
       } catch (err) {
-        console.error('generate-leads error:', err)
+        log.error('generate-leads error', {
+          error: err instanceof Error ? err.message : String(err),
+        })
         const msg = err instanceof Error ? err.message : 'Erro interno'
         sendEvent(controller, encoder, { type: 'error', message: msg })
         controller.close()

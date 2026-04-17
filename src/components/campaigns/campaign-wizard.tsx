@@ -18,6 +18,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { StepEditor, type DraftStep } from './step-editor'
+import { MessagePreview } from './message-preview'
 import { toast } from 'sonner'
 import { Check } from 'lucide-react'
 
@@ -158,15 +159,19 @@ export function CampaignWizard() {
         </Form>
       )}
 
-      {/* Step 1: Cadência */}
+      {/* Step 1: Cadência — editor + live preview side-by-side on ≥lg */}
       {currentStep === 1 && (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">
             Configure os steps de mensagem. Use variáveis como{' '}
             <code className="bg-muted px-1 rounded text-xs">{'{{decisor_nome}}'}</code>{' '}
-            para personalização automática.
+            para personalização automática — o preview ao lado usa o primeiro
+            lead da sua lista.
           </p>
-          <StepEditor steps={cadenciaSteps} onChange={setCadenciaSteps} />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+            <StepEditor steps={cadenciaSteps} onChange={setCadenciaSteps} />
+            <MessagePreview steps={cadenciaSteps} />
+          </div>
         </div>
       )}
 

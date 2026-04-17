@@ -13,6 +13,7 @@ import { channelsRouter } from './channels'
 import { agentsRouter } from './agents'
 import { pipelineRulesRouter } from './pipeline-rules'
 import { adminRouter } from './admin'
+import { trialRouter } from './trial'
 
 export const appRouter = router({
   leads: leadsRouter,
@@ -29,6 +30,7 @@ export const appRouter = router({
   agents: agentsRouter,
   pipelineRules: pipelineRulesRouter,
   admin: adminRouter,
+  trial: trialRouter,
 })
 
 export type AppRouter = typeof appRouter

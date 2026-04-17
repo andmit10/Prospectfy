@@ -1,7 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Kbd } from '@/components/ui/kbd'
-import { Search, Bell } from 'lucide-react'
+import { Search } from 'lucide-react'
+import { NotificationBell } from './notification-bell'
+import { TrialBadge } from './trial-badge'
 
 interface HeaderProps {
   title: string
@@ -46,18 +48,11 @@ export async function Header({ title }: HeaderProps) {
           <Kbd>⌘K</Kbd>
         </button>
 
-        {/* Notifications */}
-        <button
-          type="button"
-          aria-label="Notificações"
-          className="relative flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-3)] hover:text-[var(--text-primary)]"
-        >
-          <Bell className="h-3.5 w-3.5" />
-          <span
-            aria-hidden
-            className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[var(--primary)]"
-          />
-        </button>
+        {/* Trial countdown (hides itself on paid plans) */}
+        <TrialBadge />
+
+        {/* Notifications — Realtime reply indicator */}
+        <NotificationBell />
 
         {/* Avatar */}
         <Avatar className="h-8 w-8">

@@ -73,6 +73,24 @@ type ToolCallLogEntry = {
 export async function executeAgent(opts: ExecuteOptions): Promise<ExecuteResult> {
   const supabase = createServiceClient()
 
+  // 0. Trial gate — expired trials must not send outbound messages. The
+  // lead-generation quota is enforced on the /generate endpoint separately.
+  // We intentionally still allow manual runs so the user can dry-run their
+  // agent copy, but cron/webhook/response triggers are blocked.
+  if (opts.trigger !== 'manual') {
+    const { getTrialStatus } = await import('@/lib/trial/limits')
+    const trial = await getTrialStatus(supabase, opts.orgId)
+    if (trial.expired) {
+      return {
+        runId: '',
+        status: 'skipped',
+        tokensUsed: 0,
+        costUsd: 0,
+        error: 'Trial expirado — faça upgrade para retomar os envios.',
+      }
+    }
+  }
+
   // 1. Load agent + validate definition.
   const { data: agentRow, error: loadErr } = await supabase
     .from('agents')

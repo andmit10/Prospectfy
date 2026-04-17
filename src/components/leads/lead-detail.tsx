@@ -2,7 +2,8 @@
 
 import { trpc } from '@/lib/trpc-client'
 import { PipelineBadge } from './pipeline-badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { TimelineView } from './timeline-view'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -28,85 +29,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { getMeta } from './lead-visuals'
-import type { Interaction, InteracaoTipo } from '@/types'
-
-const interacaoLabel: Record<InteracaoTipo, string> = {
-  enviado:   'Mensagem enviada',
-  entregue:  'Entregue',
-  lido:      'Lido',
-  respondido:'Lead respondeu',
-  clicado:   'Clicou no link',
-  bounce:    'Bounce',
-  erro:      'Erro no envio',
-}
-
-const interacaoColor: Record<InteracaoTipo, string> = {
-  enviado:   '#3B82F6',
-  entregue:  '#64748B',
-  lido:      '#A855F7',
-  respondido:'#10B981',
-  clicado:   '#F59E0B',
-  bounce:    '#EF4444',
-  erro:      '#EF4444',
-}
-
-function InteractionTimeline({ interactions }: { interactions: Interaction[] }) {
-  if (interactions.length === 0) {
-    return (
-      <p className="text-sm text-[var(--text-tertiary)]">
-        Nenhuma interação ainda.
-      </p>
-    )
-  }
-
-  return (
-    <ol className="relative border-l border-[var(--border)] ml-3 space-y-4">
-      {interactions.map((it) => {
-        const c = interacaoColor[it.tipo]
-        return (
-          <li key={it.id} className="ml-4">
-            <div
-              className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border-2 border-[var(--background)]"
-              style={{ backgroundColor: c }}
-            />
-            <div className="flex items-center gap-2 mb-1">
-              <span
-                className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase"
-                style={{
-                  backgroundColor: `color-mix(in oklab, ${c} 12%, transparent)`,
-                  color: c,
-                  letterSpacing: '0.05em',
-                }}
-              >
-                {interacaoLabel[it.tipo]}
-              </span>
-              <span className="text-xs text-[var(--text-tertiary)]">
-                {new Date(it.created_at).toLocaleString('pt-BR')}
-              </span>
-            </div>
-            {it.mensagem_enviada && (
-              <p className="text-sm bg-[var(--surface-2)] rounded p-2 mt-1 text-[var(--text-primary)]">
-                {it.mensagem_enviada}
-              </p>
-            )}
-            {it.resposta_lead && (
-              <p
-                className="text-sm rounded p-2 mt-1"
-                style={{
-                  backgroundColor: 'color-mix(in oklab, #10B981 10%, transparent)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid color-mix(in oklab, #10B981 25%, transparent)',
-                }}
-              >
-                <strong style={{ color: '#10B981' }}>Resposta:</strong> {it.resposta_lead}
-              </p>
-            )}
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
+import type { Interaction } from '@/types'
 
 /**
  * Colored field row — icon chip + label + value. Consistent pattern
@@ -422,23 +345,8 @@ export function LeadDetail({ id }: { id: string }) {
         </Section>
       ) : null}
 
-      {/* Timeline */}
-      <Card>
-        <CardHeader>
-          <CardTitle
-            className="text-[15px] font-semibold"
-            style={{
-              fontFamily: 'var(--font-display), var(--font-sans), system-ui, sans-serif',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            Timeline de interações
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <InteractionTimeline interactions={interactions} />
-        </CardContent>
-      </Card>
+      {/* Timeline (Realtime via Supabase) */}
+      <TimelineView leadId={id} initialInteractions={interactions} />
     </div>
   )
 }

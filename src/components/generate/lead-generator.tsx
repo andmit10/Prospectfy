@@ -976,10 +976,24 @@ export function LeadGenerator() {
             setProgress(100)
             addLog(`Concluído — ${data.total} leads gerados`, 'success')
             toast.success(`${data.total} leads gerados com sucesso!`)
+            // Refresh the trial badge so the counter updates immediately.
+            utils.trial.getStatus.invalidate()
           }
 
           if (data.type === 'error') {
-            toast.error(data.message)
+            if (data.reason === 'trial_expired' || data.reason === 'trial_quota') {
+              toast.error(data.message, {
+                duration: 10_000,
+                action: {
+                  label: 'Ver planos',
+                  onClick: () => router.push('/settings/billing'),
+                },
+              })
+              // Refresh the trial badge so the header reflects the new state.
+              await utils.trial.getStatus.invalidate()
+            } else {
+              toast.error(data.message)
+            }
             addLog(data.message, 'info')
           }
         }

@@ -15,23 +15,20 @@ import {
 } from '@/components/ui/select'
 import { Trash2, Plus, GripVertical } from 'lucide-react'
 import type { CadenciaStep } from '@/types'
+import {
+  renderTemplate,
+  TEMPLATE_VARIABLES,
+  type TemplateVars,
+} from '@/lib/template/render-template'
 
 export type DraftStep = Omit<CadenciaStep, 'id' | 'campaign_id' | 'created_at'>
 
-const VARIABLES = ['{{decisor_nome}}', '{{empresa_nome}}', '{{segmento}}', '{{decisor_cargo}}']
+const VARIABLES = TEMPLATE_VARIABLES.slice(0, 4)
 
 interface StepEditorProps {
   steps: DraftStep[]
   onChange: (steps: DraftStep[]) => void
-  sampleLead?: Record<string, string>
-}
-
-function renderPreview(template: string, sample: Record<string, string>): string {
-  return template
-    .replace(/\{\{decisor_nome\}\}/g, sample.decisor_nome ?? 'João Silva')
-    .replace(/\{\{empresa_nome\}\}/g, sample.empresa_nome ?? 'Acme Ltda')
-    .replace(/\{\{segmento\}\}/g, sample.segmento ?? 'Tecnologia')
-    .replace(/\{\{decisor_cargo\}\}/g, sample.decisor_cargo ?? 'CEO')
+  sampleLead?: TemplateVars
 }
 
 export function StepEditor({ steps, onChange, sampleLead = {} }: StepEditorProps) {
@@ -160,7 +157,7 @@ export function StepEditor({ steps, onChange, sampleLead = {} }: StepEditorProps
                 </button>
                 {previewIndex === i && (
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm whitespace-pre-wrap">
-                    {renderPreview(step.mensagem_template, sampleLead)}
+                    {renderTemplate(step.mensagem_template, sampleLead)}
                   </div>
                 )}
               </div>
