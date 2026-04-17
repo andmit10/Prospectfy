@@ -1,31 +1,42 @@
 import { z } from 'zod'
-import { router, protectedProcedure } from '@/lib/trpc'
+import { router, orgProcedure, writerProcedure } from '@/lib/trpc'
 
 export const leadsRouter = router({
-  list: protectedProcedure
+  list: orgProcedure
     .input(
       z.object({
         page: z.number().default(1),
         pageSize: z.number().default(50),
         status: z.string().optional(),
         campaignId: z.string().uuid().optional(),
+        pipelineId: z.string().uuid().nullable().optional(),
+        segmento: z.string().optional(),
+        cidade: z.string().optional(),
         search: z.string().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
-      const { page, pageSize, status, campaignId, search } = input
+      const { page, pageSize, status, campaignId, pipelineId, segmento, cidade, search } = input
       const from = (page - 1) * pageSize
 
       let query = ctx.supabase
         .from('leads')
         .select('*', { count: 'exact' })
-        .eq('user_id', ctx.user.id)
+        .eq('organization_id', ctx.orgId)
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .range(from, from + pageSize - 1)
 
       if (status) query = query.eq('status_pipeline', status)
       if (campaignId) query = query.eq('campaign_id', campaignId)
+      if (pipelineId === null) {
+        // Explicit null means "sem pipeline"
+        query = query.is('pipeline_id', null)
+      } else if (pipelineId) {
+        query = query.eq('pipeline_id', pipelineId)
+      }
+      if (segmento) query = query.ilike('segmento', `%${segmento}%`)
+      if (cidade) query = query.ilike('cidade', `%${cidade}%`)
       if (search) {
         query = query.or(
           `decisor_nome.ilike.%${search}%,empresa_nome.ilike.%${search}%`
@@ -38,14 +49,14 @@ export const leadsRouter = router({
       return { leads: data ?? [], total: count ?? 0 }
     }),
 
-  getById: protectedProcedure
+  getById: orgProcedure
     .input(z.string().uuid())
     .query(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('leads')
         .select('*, interactions(*)')
         .eq('id', input)
-        .eq('user_id', ctx.user.id)
+        .eq('organization_id', ctx.orgId)
         .is('deleted_at', null)
         .single()
 
@@ -53,7 +64,7 @@ export const leadsRouter = router({
       return data
     }),
 
-  create: protectedProcedure
+  create: writerProcedure
     .input(
       z.object({
         empresa_nome: z.string().min(1),
@@ -74,7 +85,12 @@ export const leadsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('leads')
-        .insert({ ...input, user_id: ctx.user.id, fonte: 'manual' })
+        .insert({
+          ...input,
+          organization_id: ctx.orgId,
+          user_id: ctx.user.id, // kept as "creator" audit field
+          fonte: 'manual',
+        })
         .select()
         .single()
 
@@ -82,7 +98,7 @@ export const leadsRouter = router({
       return data
     }),
 
-  update: protectedProcedure
+  update: writerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -107,7 +123,7 @@ export const leadsRouter = router({
         .from('leads')
         .update({ ...rest, updated_at: new Date().toISOString() })
         .eq('id', id)
-        .eq('user_id', ctx.user.id)
+        .eq('organization_id', ctx.orgId)
         .select()
         .single()
 
@@ -115,16 +131,100 @@ export const leadsRouter = router({
       return data
     }),
 
-  softDelete: protectedProcedure
+  softDelete: writerProcedure
     .input(z.string().uuid())
     .mutation(async ({ ctx, input }) => {
       const { error } = await ctx.supabase
         .from('leads')
         .update({ deleted_at: new Date().toISOString() })
         .eq('id', input)
-        .eq('user_id', ctx.user.id)
+        .eq('organization_id', ctx.orgId)
 
       if (error) throw error
       return { success: true }
+    }),
+
+  bulkUpdateTags: writerProcedure
+    .input(z.object({
+      leadIds: z.array(z.string().uuid()).min(1),
+      addTags: z.array(z.string()).default([]),
+      removeTags: z.array(z.string()).default([]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { leadIds, addTags, removeTags } = input
+
+      // Fetch current leads (scoped to org)
+      const { data: leads, error: fetchError } = await ctx.supabase
+        .from('leads')
+        .select('id, tags')
+        .eq('organization_id', ctx.orgId)
+        .in('id', leadIds)
+        .is('deleted_at', null)
+
+      if (fetchError) throw fetchError
+
+      // Update each lead's tags
+      const updates = (leads ?? []).map(lead => {
+        let tags = lead.tags ?? []
+        tags = [...new Set([...tags, ...addTags])]
+        tags = tags.filter((t: string) => !removeTags.includes(t))
+        return ctx.supabase
+          .from('leads')
+          .update({ tags, updated_at: new Date().toISOString() })
+          .eq('id', lead.id)
+          .eq('organization_id', ctx.orgId)
+      })
+
+      await Promise.all(updates)
+      return { updated: leads?.length ?? 0 }
+    }),
+
+  bulkMoveCampaign: writerProcedure
+    .input(z.object({
+      leadIds: z.array(z.string().uuid()).min(1),
+      campaignId: z.string().uuid().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { error } = await ctx.supabase
+        .from('leads')
+        .update({ campaign_id: input.campaignId, updated_at: new Date().toISOString() })
+        .eq('organization_id', ctx.orgId)
+        .in('id', input.leadIds)
+        .is('deleted_at', null)
+
+      if (error) throw error
+      return { updated: input.leadIds.length }
+    }),
+
+  bulkUpdateStatus: writerProcedure
+    .input(z.object({
+      leadIds: z.array(z.string().uuid()).min(1),
+      status: z.enum(['novo', 'contatado', 'respondeu', 'reuniao', 'convertido', 'perdido']),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { error } = await ctx.supabase
+        .from('leads')
+        .update({ status_pipeline: input.status, updated_at: new Date().toISOString() })
+        .eq('organization_id', ctx.orgId)
+        .in('id', input.leadIds)
+        .is('deleted_at', null)
+
+      if (error) throw error
+      return { updated: input.leadIds.length }
+    }),
+
+  bulkDelete: writerProcedure
+    .input(z.object({
+      leadIds: z.array(z.string().uuid()).min(1),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { error } = await ctx.supabase
+        .from('leads')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('organization_id', ctx.orgId)
+        .in('id', input.leadIds)
+
+      if (error) throw error
+      return { deleted: input.leadIds.length }
     }),
 })

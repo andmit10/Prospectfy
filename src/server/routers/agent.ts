@@ -1,19 +1,18 @@
 import { z } from 'zod'
-import { router, protectedProcedure } from '@/lib/trpc'
+import { router, orgProcedure } from '@/lib/trpc'
 
 export const agentRouter = router({
-  /** Queue stats for the current user */
-  queueStats: protectedProcedure.query(async ({ ctx }) => {
-    const uid = ctx.user.id
-
-    // Fetch all leads belonging to the user to get their IDs
-    const { data: userLeads } = await ctx.supabase
+  /** Queue stats for the active organization */
+  queueStats: orgProcedure.query(async ({ ctx }) => {
+    // Fetch leads belonging to the active org (RLS + explicit filter for
+    // index selectivity).
+    const { data: orgLeads } = await ctx.supabase
       .from('leads')
       .select('id')
-      .eq('user_id', uid)
+      .eq('organization_id', ctx.orgId)
       .is('deleted_at', null)
 
-    const leadIds = (userLeads ?? []).map((l) => l.id)
+    const leadIds = (orgLeads ?? []).map((l) => l.id)
     if (leadIds.length === 0) {
       return { pending: 0, processing: 0, completed: 0, failed: 0, total: 0 }
     }
@@ -48,19 +47,17 @@ export const agentRouter = router({
     return { pending: p, processing: pr, completed: c, failed: f, total: p + pr + c + f }
   }),
 
-  /** Recent agent jobs with lead info */
-  recentJobs: protectedProcedure
+  /** Recent agent jobs with lead info (scoped to active org) */
+  recentJobs: orgProcedure
     .input(z.object({ limit: z.number().default(20) }))
     .query(async ({ ctx, input }) => {
-      const uid = ctx.user.id
-
-      const { data: userLeads } = await ctx.supabase
+      const { data: orgLeads } = await ctx.supabase
         .from('leads')
         .select('id')
-        .eq('user_id', uid)
+        .eq('organization_id', ctx.orgId)
         .is('deleted_at', null)
 
-      const leadIds = (userLeads ?? []).map((l) => l.id)
+      const leadIds = (orgLeads ?? []).map((l) => l.id)
       if (leadIds.length === 0) return []
 
       const { data } = await ctx.supabase
@@ -81,19 +78,17 @@ export const agentRouter = router({
       }))
     }),
 
-  /** Recent agent reasoning logs from interactions */
-  recentReasoning: protectedProcedure
+  /** Recent agent reasoning logs from interactions (scoped to active org) */
+  recentReasoning: orgProcedure
     .input(z.object({ limit: z.number().default(10) }))
     .query(async ({ ctx, input }) => {
-      const uid = ctx.user.id
-
-      const { data: userLeads } = await ctx.supabase
+      const { data: orgLeads } = await ctx.supabase
         .from('leads')
         .select('id')
-        .eq('user_id', uid)
+        .eq('organization_id', ctx.orgId)
         .is('deleted_at', null)
 
-      const leadIds = (userLeads ?? []).map((l) => l.id)
+      const leadIds = (orgLeads ?? []).map((l) => l.id)
       if (leadIds.length === 0) return []
 
       const { data } = await ctx.supabase

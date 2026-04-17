@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from 'sonner'
 import { clientEnv } from '@/lib/env'
 
-type Mode = 'signin' | 'signup' | 'signup_done'
+type Mode = 'signin' | 'signup' | 'signup_done' | 'magiclink'
 
 export function LoginForm() {
   const router = useRouter()
@@ -24,6 +24,7 @@ export function LoginForm() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [magicLinkSent, setMagicLinkSent] = useState(false)
   const supabase = createClient()
 
   // ── Sign In ────────────────────────────────────────────────────────────────
@@ -74,6 +75,28 @@ export function LoginForm() {
     setLoading(false)
   }
 
+  // ── Magic Link ─────────────────────────────────────────────────────────────
+  async function handleMagicLink(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email) {
+      toast.error('Informe seu e-mail para receber o link mágico.')
+      return
+    }
+    setLoading(true)
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: `${clientEnv.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      },
+    })
+    if (error) {
+      toast.error(error.message)
+    } else {
+      setMagicLinkSent(true)
+    }
+    setLoading(false)
+  }
+
   // ── Google OAuth ───────────────────────────────────────────────────────────
   async function handleGoogle() {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -109,7 +132,7 @@ export function LoginForm() {
       <div className="flex border-b">
         <button
           className={`flex-1 py-3 text-sm font-medium transition-colors ${
-            mode === 'signin'
+            mode === 'signin' || mode === 'magiclink'
               ? 'border-b-2 border-primary text-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
@@ -131,7 +154,7 @@ export function LoginForm() {
 
       <CardHeader className="pb-2">
         <CardTitle className="text-base">
-          {mode === 'signin' ? 'Acesse sua conta' : 'Crie sua conta gratuitamente'}
+          {mode === 'signin' ? 'Acesse sua conta' : mode === 'magiclink' ? 'Entrar com link mágico' : 'Crie sua conta gratuitamente'}
         </CardTitle>
         {confirmed && (
           <p className="text-sm text-green-600 font-medium">
@@ -176,7 +199,60 @@ export function LoginForm() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Entrando...' : 'Entrar'}
             </Button>
+            <button
+              type="button"
+              className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => setMode('magiclink')}
+            >
+              Entrar com link mágico (sem senha)
+            </button>
           </form>
+        )}
+
+        {/* ── Magic Link form ── */}
+        {mode === 'magiclink' && (
+          magicLinkSent ? (
+            <div className="space-y-3 text-center">
+              <p className="text-sm text-green-600 font-medium">
+                Link mágico enviado para <strong>{email}</strong>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Verifique sua caixa de entrada e clique no link para entrar.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => { setMagicLinkSent(false); setMode('signin') }}
+              >
+                Voltar para login
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleMagicLink} className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="email-magic">E-mail</Label>
+                <Input
+                  id="email-magic"
+                  type="email"
+                  placeholder="voce@empresa.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? 'Enviando...' : 'Enviar link mágico'}
+              </Button>
+              <button
+                type="button"
+                className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setMode('signin')}
+              >
+                Voltar para login com senha
+              </button>
+            </form>
+          )
         )}
 
         {/* ── Sign Up form ── */}

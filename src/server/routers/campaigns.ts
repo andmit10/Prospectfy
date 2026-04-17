@@ -1,5 +1,8 @@
 import { z } from 'zod'
-import { router, protectedProcedure } from '@/lib/trpc'
+import { TRPCError } from '@trpc/server'
+import { router, orgProcedure, writerProcedure } from '@/lib/trpc'
+import { CAMPAIGN_TEMPLATES, getTemplateById } from '@/lib/campaigns/templates'
+import { llm } from '@/lib/llm'
 
 const cadenciaStepInput = z.object({
   step_order: z.number().int().positive(),
@@ -11,32 +14,32 @@ const cadenciaStepInput = z.object({
 })
 
 export const campaignsRouter = router({
-  list: protectedProcedure.query(async ({ ctx }) => {
+  list: orgProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase
       .from('campaigns')
       .select('*')
-      .eq('user_id', ctx.user.id)
+      .eq('organization_id', ctx.orgId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
     return data ?? []
   }),
 
-  getById: protectedProcedure
+  getById: orgProcedure
     .input(z.string().uuid())
     .query(async ({ ctx, input }) => {
       const { data, error } = await ctx.supabase
         .from('campaigns')
         .select('*, cadencia_steps(*)')
         .eq('id', input)
-        .eq('user_id', ctx.user.id)
+        .eq('organization_id', ctx.orgId)
         .single()
 
       if (error) throw error
       return data
     }),
 
-  create: protectedProcedure
+  create: writerProcedure
     .input(
       z.object({
         nome: z.string().min(1),
@@ -50,7 +53,12 @@ export const campaignsRouter = router({
 
       const { data: campaign, error } = await ctx.supabase
         .from('campaigns')
-        .insert({ ...campaignData, user_id: ctx.user.id, status: 'rascunho' })
+        .insert({
+          ...campaignData,
+          organization_id: ctx.orgId,
+          user_id: ctx.user.id, // audit: creator
+          status: 'rascunho',
+        })
         .select()
         .single()
 
@@ -67,7 +75,7 @@ export const campaignsRouter = router({
       return campaign
     }),
 
-  update: protectedProcedure
+  update: writerProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -83,7 +91,7 @@ export const campaignsRouter = router({
         .from('campaigns')
         .update({ ...rest, updated_at: new Date().toISOString() })
         .eq('id', id)
-        .eq('user_id', ctx.user.id)
+        .eq('organization_id', ctx.orgId)
         .select()
         .single()
 
@@ -91,7 +99,187 @@ export const campaignsRouter = router({
       return data
     }),
 
-  upsertSteps: protectedProcedure
+  /**
+   * Expose the catalog so the UI can render template cards without
+   * shipping the full copy to every render of the campaigns page.
+   */
+  listTemplates: orgProcedure.query(() => {
+    return CAMPAIGN_TEMPLATES.map((t) => ({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      category: t.category,
+      icon: t.icon,
+      color: t.color,
+      useCase: t.useCase,
+      expectedResult: t.expectedResult,
+      tags: t.tags,
+      stepCount: t.steps.length,
+      channels: Array.from(new Set(t.steps.map((s) => s.canal))),
+      // Steps are only sent on-demand (getTemplate below) — cheaper list.
+    }))
+  }),
+
+  getTemplate: orgProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ input }) => {
+      const tpl = getTemplateById(input.id)
+      if (!tpl) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Template não encontrado' })
+      }
+      return tpl
+    }),
+
+  /**
+   * Clone a template into a real campaign. Defaults to `rascunho` so the
+   * user can review + tweak before activating.
+   */
+  createFromTemplate: writerProcedure
+    .input(
+      z.object({
+        templateId: z.string(),
+        nome: z.string().min(1).optional(), // override name; default uses template name
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const tpl = getTemplateById(input.templateId)
+      if (!tpl) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Template não encontrado' })
+      }
+
+      const { data: campaign, error } = await ctx.supabase
+        .from('campaigns')
+        .insert({
+          nome: input.nome ?? tpl.name,
+          descricao: tpl.description,
+          organization_id: ctx.orgId,
+          user_id: ctx.user.id,
+          status: 'rascunho',
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      const stepRows = tpl.steps.map((s) => ({
+        campaign_id: campaign.id,
+        step_order: s.step_order,
+        canal: s.canal,
+        delay_hours: s.delay_hours,
+        tipo_mensagem: s.tipo_mensagem,
+        mensagem_template: s.mensagem_template,
+        ativo: true,
+      }))
+
+      const { error: stepsError } = await ctx.supabase
+        .from('cadencia_steps')
+        .insert(stepRows)
+
+      if (stepsError) {
+        // Best-effort rollback — delete the campaign we just created.
+        await ctx.supabase.from('campaigns').delete().eq('id', campaign.id)
+        throw stepsError
+      }
+
+      return campaign
+    }),
+
+  /**
+   * Natural-language → compiled campaign.
+   *
+   * User types e.g. "quero reaquecer clientes que sumiram há 30+ dias com 3
+   * mensagens leves" and the LLM compiles a full cadence. Returns the
+   * proposed campaign WITHOUT persisting — the UI shows a preview so the
+   * user can accept, tweak or regenerate before saving.
+   */
+  compileFromDescription: writerProcedure
+    .input(
+      z.object({
+        description: z.string().min(10).max(2000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const schema = {
+        type: 'object',
+        additionalProperties: false,
+        required: ['nome', 'descricao', 'steps'],
+        properties: {
+          nome: { type: 'string', minLength: 3, maxLength: 80 },
+          descricao: { type: 'string', minLength: 10, maxLength: 400 },
+          steps: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 8,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['step_order', 'canal', 'delay_hours', 'mensagem_template'],
+              properties: {
+                step_order: { type: 'integer', minimum: 1, maximum: 10 },
+                canal: { type: 'string', enum: ['whatsapp', 'email', 'linkedin'] },
+                delay_hours: { type: 'integer', minimum: 0, maximum: 720 },
+                tipo_mensagem: {
+                  type: 'string',
+                  enum: ['texto', 'imagem', 'documento', 'audio'],
+                  default: 'texto',
+                },
+                mensagem_template: { type: 'string', minLength: 20, maxLength: 1200 },
+              },
+            },
+          },
+        },
+      }
+
+      const systemPrompt = `Você é um SDR sênior brasileiro que redige cadências de prospecção em português do Brasil.
+Regras obrigatórias:
+- Tom consultivo, humano e direto. Zero clichê corporativo, zero "espero que esteja bem".
+- Use variáveis {{decisor_nome}}, {{empresa_nome}}, {{segmento}} — o sistema substitui na hora do envio.
+- Mensagens WhatsApp: até 3 parágrafos, frases curtas, uma pergunta/CTA no final.
+- Mensagens Email: assunto pode estar na primeira linha como "Assunto: ..." seguida da mensagem.
+- Intervalos (delay_hours): primeira mensagem delay_hours=0; próximas progressivas (24-72h entre toques, até 168h para reengajar).
+- Cada step deve ter um ângulo DIFERENTE (não repita o mesmo gancho).
+- Última mensagem: tom de "última tentativa" elegante (não agressivo).
+
+Você recebe uma descrição do usuário e devolve um JSON válido com { nome, descricao, steps[] }.`
+
+      const userPrompt = `Descrição do usuário:\n"""${input.description}"""\n\nCompile em uma campanha pronta. Escolha canal(is) adequados à descrição (padrão WhatsApp se não especificado). Entre 3 e 6 steps na maioria dos casos. JSON apenas.`
+
+      try {
+        const result = await llm.extract<{
+          nome: string
+          descricao: string
+          steps: Array<{
+            step_order: number
+            canal: 'whatsapp' | 'email' | 'linkedin'
+            delay_hours: number
+            tipo_mensagem?: 'texto' | 'imagem' | 'documento' | 'audio'
+            mensagem_template: string
+          }>
+        }>({
+          system: systemPrompt,
+          user: userPrompt,
+          schema,
+          orgId: ctx.orgId,
+          userId: ctx.user.id,
+          maxTokens: 2500,
+        })
+
+        return {
+          draft: result.data,
+          modelId: result.modelId,
+          fallbackUsed: result.fallbackUsed,
+          requestId: result.requestId,
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Erro ao compilar'
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Não consegui compilar a campanha: ${msg}`,
+        })
+      }
+    }),
+
+  upsertSteps: writerProcedure
     .input(
       z.object({
         campaign_id: z.string().uuid(),
@@ -99,12 +287,12 @@ export const campaignsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Verify ownership
+      // Verify the campaign belongs to the caller's org before mutating steps.
       const { data: campaign } = await ctx.supabase
         .from('campaigns')
         .select('id')
         .eq('id', input.campaign_id)
-        .eq('user_id', ctx.user.id)
+        .eq('organization_id', ctx.orgId)
         .single()
 
       if (!campaign) throw new Error('Campaign not found')

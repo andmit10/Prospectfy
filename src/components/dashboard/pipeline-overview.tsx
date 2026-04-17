@@ -6,12 +6,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { PipelineStatus } from '@/types'
 
 const stages: { key: PipelineStatus; label: string; color: string }[] = [
-  { key: 'novo',       label: 'Novo',       color: 'bg-slate-400' },
-  { key: 'contatado',  label: 'Contatado',  color: 'bg-blue-400' },
-  { key: 'respondeu',  label: 'Respondeu',  color: 'bg-yellow-400' },
-  { key: 'reuniao',    label: 'Reunião',    color: 'bg-purple-400' },
-  { key: 'convertido', label: 'Convertido', color: 'bg-green-400' },
-  { key: 'perdido',    label: 'Perdido',    color: 'bg-red-400' },
+  { key: 'novo',       label: 'Novo',       color: '#64748B' },
+  { key: 'contatado',  label: 'Contatado',  color: '#3B82F6' },
+  { key: 'respondeu',  label: 'Respondeu',  color: '#F59E0B' },
+  { key: 'reuniao',    label: 'Reunião',    color: '#A855F7' },
+  { key: 'convertido', label: 'Convertido', color: '#10B981' },
+  { key: 'perdido',    label: 'Perdido',    color: '#EF4444' },
 ]
 
 export function PipelineOverview() {
@@ -23,7 +23,15 @@ export function PipelineOverview() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Pipeline de leads</CardTitle>
+        <CardTitle
+          className="text-[15px] font-semibold"
+          style={{
+            fontFamily: 'var(--font-display), var(--font-sans), system-ui, sans-serif',
+            letterSpacing: '-0.01em',
+          }}
+        >
+          Pipeline de leads
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {isLoading ? (
@@ -39,8 +47,8 @@ export function PipelineOverview() {
                 return pct > 0 ? (
                   <div
                     key={key}
-                    className={`${color} transition-all`}
-                    style={{ width: `${pct}%` }}
+                    className="transition-all"
+                    style={{ width: `${pct}%`, backgroundColor: color }}
                   />
                 ) : null
               })}
@@ -50,9 +58,19 @@ export function PipelineOverview() {
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
               {stages.map(({ key, label, color }) => (
                 <div key={key} className="flex items-center gap-2 text-sm">
-                  <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${color}`} />
-                  <span className="text-muted-foreground flex-1">{label}</span>
-                  <span className="font-medium tabular-nums">{pipeline[key] ?? 0}</span>
+                  <span
+                    className="h-2.5 w-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="text-[var(--text-secondary)] flex-1">{label}</span>
+                  <span
+                    className="font-semibold tabular-nums text-[var(--text-primary)]"
+                    style={{
+                      fontFamily: 'var(--font-display), var(--font-sans), system-ui, sans-serif',
+                    }}
+                  >
+                    {pipeline[key] ?? 0}
+                  </span>
                 </div>
               ))}
             </div>

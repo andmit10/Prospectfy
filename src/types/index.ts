@@ -21,10 +21,24 @@ export type InteracaoTipo =
 
 export type CampaignStatus = 'rascunho' | 'ativa' | 'pausada' | 'concluida'
 
+export interface Pipeline {
+  id: string
+  user_id: string
+  nome: string
+  descricao: string | null
+  is_default: boolean
+  is_shared: boolean
+  stages: string[]
+  color: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Lead {
   id: string
   user_id: string
   campaign_id: string | null
+  pipeline_id: string | null
   empresa_nome: string
   cnpj: string | null
   segmento: string | null

@@ -19,15 +19,19 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { Lead, PipelineStatus } from '@/types'
 
 const COLUMNS: { key: PipelineStatus; label: string; color: string }[] = [
-  { key: 'novo',       label: 'Novo',       color: 'border-t-slate-400' },
-  { key: 'contatado',  label: 'Contatado',  color: 'border-t-blue-400' },
-  { key: 'respondeu',  label: 'Respondeu',  color: 'border-t-yellow-400' },
-  { key: 'reuniao',    label: 'Reunião',    color: 'border-t-purple-400' },
-  { key: 'convertido', label: 'Convertido', color: 'border-t-green-400' },
-  { key: 'perdido',    label: 'Perdido',    color: 'border-t-red-400' },
+  { key: 'novo',       label: 'Novo',       color: '#64748B' },
+  { key: 'contatado',  label: 'Contatado',  color: '#3B82F6' },
+  { key: 'respondeu',  label: 'Respondeu',  color: '#F59E0B' },
+  { key: 'reuniao',    label: 'Reunião',    color: '#A855F7' },
+  { key: 'convertido', label: 'Convertido', color: '#10B981' },
+  { key: 'perdido',    label: 'Perdido',    color: '#EF4444' },
 ]
 
-export function KanbanBoard() {
+type KanbanBoardProps = {
+  pipelineId?: string | null
+}
+
+export function KanbanBoard({ pipelineId }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null)
 
   const { data, isLoading } = trpc.leads.list.useQuery({ page: 1, pageSize: 500 })
@@ -41,7 +45,12 @@ export function KanbanBoard() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
-  const leads = (data?.leads ?? []) as Lead[]
+  const allLeads = (data?.leads ?? []) as Lead[]
+  // Filter by selected pipeline. Leads without pipeline_id show up in the default pipeline only.
+  const leads = pipelineId
+    ? allLeads.filter((l) => l.pipeline_id === pipelineId)
+    : allLeads
+
   const byStatus = Object.fromEntries(
     COLUMNS.map(({ key }) => [key, leads.filter((l) => l.status_pipeline === key)])
   ) as Record<PipelineStatus, Lead[]>

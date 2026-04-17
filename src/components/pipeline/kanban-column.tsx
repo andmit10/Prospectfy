@@ -17,14 +17,34 @@ export function KanbanColumn({ column, leads, children }: KanbanColumnProps) {
     <div
       ref={setNodeRef}
       className={cn(
-        'flex w-56 shrink-0 flex-col rounded-lg border border-t-4 bg-muted/30 transition-colors',
-        column.color,
-        isOver && 'bg-muted/60 ring-2 ring-primary/30'
+        'flex w-56 shrink-0 flex-col rounded-xl border bg-[var(--surface-1)] transition-all',
+        isOver && 'ring-2 ring-offset-1'
       )}
+      style={{
+        borderColor: 'var(--border)',
+        borderTopWidth: 3,
+        borderTopColor: column.color,
+        ...(isOver && { boxShadow: `0 0 0 2px color-mix(in oklab, ${column.color} 30%, transparent)` }),
+      }}
     >
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-sm font-semibold">{column.label}</span>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+      <div className="flex items-center justify-between px-3 py-2.5">
+        <span
+          className="text-[13px] font-bold uppercase"
+          style={{
+            color: column.color,
+            fontFamily: 'var(--font-display), var(--font-sans), system-ui, sans-serif',
+            letterSpacing: '0.06em',
+          }}
+        >
+          {column.label}
+        </span>
+        <span
+          className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+          style={{
+            backgroundColor: `color-mix(in oklab, ${column.color} 14%, transparent)`,
+            color: column.color,
+          }}
+        >
           {leads.length}
         </span>
       </div>

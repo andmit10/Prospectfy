@@ -15,16 +15,16 @@ export default async function OnboardingPage() {
   if (profile?.onboarding_completed) redirect('/dashboard')
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center p-4"
-      style={{ backgroundColor: '#0A0A0A' }}
-    >
+    <div className="min-h-screen flex items-center justify-center p-4 bg-[var(--background)]">
       <div className="w-full max-w-lg">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold" style={{ color: '#F0F0F0' }}>
-            Bem-vindo ao Prospectfy!
+          <h1
+            className="font-display text-3xl font-semibold text-[var(--text-primary)]"
+            style={{ letterSpacing: '-0.025em' }}
+          >
+            Bem-vindo ao convertafy!
           </h1>
-          <p className="mt-1" style={{ color: '#888888' }}>
+          <p className="mt-1 text-[var(--text-secondary)]">
             Configure sua conta em 3 passos rápidos
           </p>
         </div>

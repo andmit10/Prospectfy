@@ -1,12 +1,12 @@
 import { Header } from '@/components/layout/header'
-import { KanbanBoard } from '@/components/pipeline/kanban-board'
+import { PipelineSelector } from '@/components/pipeline/pipeline-selector'
 
 export default function PipelinePage() {
   return (
     <>
       <Header title="Pipeline" />
       <div className="p-6 overflow-hidden">
-        <KanbanBoard />
+        <PipelineSelector />
       </div>
     </>
   )

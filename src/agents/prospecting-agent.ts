@@ -1,3 +1,22 @@
+// NOTE: LEGACY. The v2 runtime lives at `src/lib/agents/executor.ts`
+// (`executeAgent()`), driven by declarative DSL stored on `agents.definition`
+// and dispatched via the `agent-execute` BullMQ queue.
+//
+// This file is kept because `workers/worker.ts` still consumes the original
+// `agent_queue` table for campaign-cadence jobs that predate v2. New code
+// SHOULD NOT import this module — use the v2 runtime instead.
+//
+// Planned deprecation path:
+//   1. Add a migration that binds every existing campaign to a seeded
+//      "legacy-prospector" agent (cloned from the prospector-b2b template).
+//   2. Replace `runProspectingAgent()` inside `workers/worker.ts` with
+//      `executeAgent({ agentId: boundAgentId, leadId, trigger: 'cron' })`.
+//   3. Drop this file.
+//
+// Kept direct Anthropic SDK dependency here because the agentic tool_use
+// loop needs raw content blocks (tool_use / tool_result) that our flattened
+// `LlmCallResponse` doesn't surface. v2 solves this via structured step_trace
+// + tool_calls on `agent_runs` — no raw content-block round-trips needed.
 import Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { serverEnv } from '@/lib/env.server'
