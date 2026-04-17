@@ -1,0 +1,35 @@
+name: Cron — hourly enqueue
+
+# Vercel Hobby restricts cron to daily; we fire the hourly cadence enqueue
+# from GitHub Actions instead. Uses the same CRON_SECRET header the Vercel
+# route expects.
+
+on:
+  schedule:
+    # At minute 0 of every hour (UTC).
+    - cron: '0 * * * *'
+  # Allow manual runs from the Actions tab for debugging.
+  workflow_dispatch:
+
+jobs:
+  enqueue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: POST /api/cron/enqueue
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "::error::APP_URL variable is not set (repo → Settings → Variables)"
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret is not set (repo → Settings → Secrets)"
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+               -X POST \
+               -H "x-cron-secret: $CRON_SECRET" \
+               "$APP_URL/api/cron/enqueue"
