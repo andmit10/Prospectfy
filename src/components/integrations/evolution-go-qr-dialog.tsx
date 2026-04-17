@@ -97,7 +97,7 @@ export function EvolutionGoQrDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Smartphone className="h-4 w-4 text-primary" />
@@ -170,7 +170,7 @@ export function EvolutionGoQrDialog({
             {qrQuery.data?.qrCode ? (
               <div className="flex flex-col items-center gap-3">
                 <div
-                  className="rounded-lg border-2 p-3"
+                  className="rounded-lg border-2 p-4"
                   style={{ borderColor: 'var(--border)', backgroundColor: '#fff' }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -181,10 +181,10 @@ export function EvolutionGoQrDialog({
                         : `data:image/png;base64,${qrQuery.data.qrCode}`
                     }
                     alt="QR Code WhatsApp"
-                    className="h-56 w-56"
+                    className="h-80 w-80"
                   />
                 </div>
-                <p className="text-center text-xs text-[var(--text-tertiary)]">
+                <p className="text-center text-sm text-[var(--text-tertiary)]">
                   O QR expira em ~30s. Se passar, ele é renovado automaticamente.
                 </p>
               </div>
@@ -198,8 +198,8 @@ export function EvolutionGoQrDialog({
               </div>
             )}
 
-            <div className="rounded-lg border p-3 text-[11px] text-[var(--text-secondary)]">
-              <ol className="list-decimal space-y-1 pl-4">
+            <div className="rounded-lg border p-4 text-sm text-[var(--text-secondary)]">
+              <ol className="list-decimal space-y-1.5 pl-5">
                 <li>Abra o WhatsApp no celular que vai conectar</li>
                 <li>Toque em <strong>Configurações</strong> → <strong>Aparelhos conectados</strong></li>
                 <li>Toque em <strong>Conectar um aparelho</strong></li>
