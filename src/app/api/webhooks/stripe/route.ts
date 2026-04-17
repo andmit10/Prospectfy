@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import { serverEnv } from '@/lib/env.server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { childLogger } from '@/lib/logger'
+import { enforceRateLimit, clientIdFromRequest } from '@/lib/rate-limit'
 import { mapPriceToPlan, resolveOrgIdFromMetadata } from '@/server/services/stripe-helpers'
 
 const log = childLogger('webhook:stripe')
@@ -124,6 +125,14 @@ async function updateOrgPlan(
 }
 
 export async function POST(request: Request) {
+  // Per-IP burst cap. Stripe's legitimate delivery rate is well under this.
+  const ipBlocked = await enforceRateLimit({
+    key: `webhook:stripe:${clientIdFromRequest(request)}`,
+    limit: 300,
+    windowSec: 60,
+  })
+  if (ipBlocked) return ipBlocked
+
   if (!serverEnv.STRIPE_SECRET_KEY || !serverEnv.STRIPE_WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 })
   }

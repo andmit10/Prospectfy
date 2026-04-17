@@ -1,4 +1,4 @@
-import { type NextRequest } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolveCurrentOrgId } from '@/lib/org-context'
 import { llm } from '@/lib/llm'
@@ -9,6 +9,7 @@ import {
   TRIAL_LEAD_LIMIT,
 } from '@/lib/trial/limits'
 import { childLogger } from '@/lib/logger'
+import { enforceRateLimit, clientIdFromRequest } from '@/lib/rate-limit'
 import { z } from 'zod'
 
 const log = childLogger('api:generate-leads')
@@ -82,6 +83,16 @@ function sendEvent(
 }
 
 export async function POST(request: NextRequest) {
+  // Rate limits run before we start streaming so the 429 can use a normal JSON
+  // response. Claude calls are expensive — 6/min is generous for a real user
+  // and cheap enough to deter abuse.
+  const ipBlocked = await enforceRateLimit({
+    key: `generate-leads:ip:${clientIdFromRequest(request)}`,
+    limit: 30,
+    windowSec: 60,
+  })
+  if (ipBlocked) return ipBlocked
+
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
@@ -100,6 +111,24 @@ export async function POST(request: NextRequest) {
         const orgId = await resolveCurrentOrgId(supabase, user.id)
         if (!orgId) {
           sendEvent(controller, encoder, { type: 'error', message: 'Sem organização ativa' })
+          controller.close()
+          return
+        }
+
+        // Per-org cap — 6 generations per minute. The trial counter already
+        // bounds total volume; this additional bucket stops a single org from
+        // monopolising Claude/Maps capacity with a loop.
+        const orgLimitResult = await enforceRateLimit({
+          key: `generate-leads:org:${orgId}`,
+          limit: 6,
+          windowSec: 60,
+        })
+        if (orgLimitResult) {
+          sendEvent(controller, encoder, {
+            type: 'error',
+            reason: 'rate_limit',
+            message: 'Você atingiu o limite de gerações por minuto. Tente novamente em alguns segundos.',
+          })
           controller.close()
           return
         }

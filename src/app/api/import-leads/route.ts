@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { resolveCurrentOrgId } from '@/lib/org-context'
 import { childLogger } from '@/lib/logger'
+import { enforceRateLimit, clientIdFromRequest } from '@/lib/rate-limit'
 import { z } from 'zod'
 
 const log = childLogger('api:import-leads')
@@ -70,6 +71,14 @@ const inputSchema = z.object({
 export async function POST(request: NextRequest) {
   const t0 = Date.now()
   try {
+    // First gate: cheap IP-based bucket so anonymous floods don't even reach auth.
+    const ipBlocked = await enforceRateLimit({
+      key: `import-leads:ip:${clientIdFromRequest(request)}`,
+      limit: 30,
+      windowSec: 60,
+    })
+    if (ipBlocked) return ipBlocked
+
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
 
@@ -81,6 +90,15 @@ export async function POST(request: NextRequest) {
     if (!orgId) {
       return NextResponse.json({ error: 'Sem organização ativa' }, { status: 403 })
     }
+
+    // Per-org bucket — the real protection. Bulk imports are expensive
+    // (dedup + INSERT); 10/min is plenty for legitimate UI flows.
+    const orgBlocked = await enforceRateLimit({
+      key: `import-leads:org:${orgId}`,
+      limit: 10,
+      windowSec: 60,
+    })
+    if (orgBlocked) return orgBlocked
 
     const body = await request.json()
     const input = inputSchema.safeParse(body)

@@ -6,6 +6,30 @@ const minWeight = LEVEL_WEIGHT[minLevel] ?? 20
 
 type Fields = Record<string, unknown>
 
+// Sentry is loaded lazily and only when a DSN is configured. Keeping it off
+// the module's top-level imports avoids pulling the Sentry browser SDK into
+// worker/test bundles where it's unused.
+type SentryLike = {
+  captureException: (err: unknown, ctx?: { extra?: Fields }) => void
+  captureMessage: (msg: string, ctx?: { level?: 'warning' | 'error'; extra?: Fields }) => void
+}
+let sentry: SentryLike | null | undefined
+
+async function getSentry(): Promise<SentryLike | null> {
+  if (sentry !== undefined) return sentry
+  if (!process.env.NEXT_PUBLIC_SENTRY_DSN) {
+    sentry = null
+    return null
+  }
+  try {
+    const mod = await import('@sentry/nextjs')
+    sentry = mod as unknown as SentryLike
+  } catch {
+    sentry = null
+  }
+  return sentry
+}
+
 function emit(level: Level, msg: string, fields?: Fields) {
   if (LEVEL_WEIGHT[level] < minWeight) return
   const payload = {
@@ -19,6 +43,22 @@ function emit(level: Level, msg: string, fields?: Fields) {
     console.error(line)
   } else {
     console.log(line)
+  }
+
+  // Forward errors (and warnings) to Sentry when available. Fire-and-forget —
+  // never await, never throw back into the caller.
+  if (level === 'error' || level === 'warn') {
+    void getSentry().then((s) => {
+      if (!s) return
+      const err = fields?.error
+      if (err instanceof Error) {
+        s.captureException(err, { extra: fields })
+      } else if (level === 'error') {
+        s.captureMessage(msg, { level: 'error', extra: fields })
+      } else {
+        s.captureMessage(msg, { level: 'warning', extra: fields })
+      }
+    })
   }
 }
 

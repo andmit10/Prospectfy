@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { clientEnv } from '@/lib/env'
 import { serverEnv } from '@/lib/env.server'
 import { childLogger } from '@/lib/logger'
+import { enforceRateLimit, clientIdFromRequest } from '@/lib/rate-limit'
 import type { DirectfyWebhookPayload } from '@/server/services/directfy'
 
 const log = childLogger('webhook:directfy')
@@ -22,6 +23,17 @@ const STATUS_MAP = {
 } as const
 
 export async function POST(request: Request) {
+  // Per-IP ceiling for webhook traffic. Directfy runs at production volume but
+  // a misbehaving upstream (or attacker) shouldn't be able to overwhelm the
+  // Supabase write path. Signature verification is the primary defence —
+  // this is belt-and-braces for burst protection.
+  const ipBlocked = await enforceRateLimit({
+    key: `webhook:directfy:${clientIdFromRequest(request)}`,
+    limit: 300,
+    windowSec: 60,
+  })
+  if (ipBlocked) return ipBlocked
+
   const body = await request.text()
 
   // Signature is REQUIRED in all environments. Misconfiguration fails closed (503)
