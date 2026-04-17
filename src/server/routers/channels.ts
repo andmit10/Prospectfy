@@ -377,7 +377,11 @@ export const channelsRouter = router({
       // ── 5. Configure webhook + start pairing ────────────────────────────
       const webhookUrl = `${serverEnv.NEXT_PUBLIC_APP_URL}/api/webhooks/channels/whatsapp/evolution_go?integration=${newRow.id}`
       try {
-        await evoConnectInstance({ instanceId: created.id, webhookUrl })
+        await evoConnectInstance({
+          instanceId: created.id,
+          instanceToken: created.token,
+          webhookUrl,
+        })
       } catch (err) {
         // Roll back DB + remote instance — leaving a half-configured row is worse.
         await ctx.supabase.from('channel_integrations').delete().eq('id', newRow.id)

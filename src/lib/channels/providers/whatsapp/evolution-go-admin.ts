@@ -95,13 +95,19 @@ export async function createInstance(name: string): Promise<CreatedInstance> {
 /**
  * POST /instance/connect — starts pairing flow + registers webhook URL.
  * Evolution Go will then push a `QRCode` event to the webhook within ~2s.
- * The instanceId header is required.
+ *
+ * Auth note: despite what the docs imply, /instance/connect rejects the
+ * GLOBAL_API_KEY with 401 ("not authorized") on this server build. The
+ * per-instance token works for both fresh and already-paired instances,
+ * so we use it. The token comes from createInstance().
  */
 export async function connectInstance(args: {
   instanceId: string
+  instanceToken: string
   webhookUrl: string
   events?: string[] // defaults to a sane set for our dispatcher
 }): Promise<void> {
+  const { baseUrl } = readSharedConfig()
   const subscribe = args.events ?? [
     'MESSAGE',
     'SEND_MESSAGE',
@@ -109,15 +115,23 @@ export async function connectInstance(args: {
     'CONNECTION',
     'QRCODE',
   ]
-  const res = await adminFetch('/instance/connect', {
+  const init: FetchInit = {
     method: 'POST',
-    headers: { instanceId: args.instanceId },
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: args.instanceToken,
+      instanceId: args.instanceId,
+    },
     body: JSON.stringify({
       webhookUrl: args.webhookUrl,
       subscribe,
       immediate: true,
     }),
-  })
+  }
+  const d = dispatcher()
+  if (d) init.dispatcher = d
+
+  const res = await fetch(`${baseUrl}/instance/connect`, init)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`Evolution Go connectInstance ${res.status}: ${text.slice(0, 200)}`)
