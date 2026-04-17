@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { trpc } from '@/lib/trpc-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -497,11 +497,17 @@ function ConnectDialog({
     onError: (e) => toast.error(`Erro: ${e.message}`),
   })
 
-  // Reset form when entry changes
-  if (entry && displayName === '' && Object.keys(values).length === 0) {
-    setDisplayName(entry.name)
-    setIsDefault(!existingDefault)
-  }
+  // Reset form whenever the user opens a different provider's dialog
+  // (without closing in between). The previous in-render check only
+  // ran on the very first open and stuck on the first provider's name.
+  useEffect(() => {
+    if (entry) {
+      setDisplayName(entry.name)
+      setValues({})
+      setIsDefault(!existingDefault)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry?.id])
 
   if (!entry) return null
 
