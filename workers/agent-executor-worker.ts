@@ -1,12 +1,9 @@
 import { Worker, type Job } from 'bullmq'
 import IORedis from 'ioredis'
 import { executeAgent } from '@/lib/agents'
+import { childLogger } from '@/lib/logger'
 
-/**
- * BullMQ consumer for agent executions. Each job carries the agent id +
- * optional lead id + trigger metadata. The executor handles recording
- * `agent_runs` internally.
- */
+const log = childLogger('worker:agent-executor')
 
 const QUEUE = 'agent-execute'
 
@@ -26,7 +23,7 @@ type Payload = {
 
 const REDIS_URL = process.env.REDIS_URL
 if (!REDIS_URL) {
-  console.warn('[agent-executor] REDIS_URL not set — worker disabled')
+  log.warn('REDIS_URL not set — worker disabled')
 } else {
   const connection = new IORedis(REDIS_URL, {
     maxRetriesPerRequest: null,
@@ -54,14 +51,22 @@ if (!REDIS_URL) {
   )
 
   worker.on('completed', (job, result) => {
-    console.log(
-      `[agent-executor] run ${result.runId} ${result.status} — tokens=${result.tokensUsed} cost=$${result.costUsd.toFixed(4)}`
-    )
+    log.info('agent run completed', {
+      jobId: job.id,
+      runId: result.runId,
+      status: result.status,
+      tokens: result.tokensUsed,
+      costUsd: Number(result.costUsd.toFixed(4)),
+    })
   })
 
   worker.on('failed', (job, err) => {
-    console.error(`[agent-executor] job ${job?.id} failed:`, err.message)
+    log.error('agent run failed', {
+      jobId: job?.id,
+      error: err.message,
+      stack: err.stack,
+    })
   })
 
-  console.log('[agent-executor] BullMQ agent execution worker started')
+  log.info('agent executor worker started', { concurrency: 5 })
 }

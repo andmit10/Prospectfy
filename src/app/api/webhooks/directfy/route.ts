@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { clientEnv } from '@/lib/env'
 import { serverEnv } from '@/lib/env.server'
+import { childLogger } from '@/lib/logger'
 import type { DirectfyWebhookPayload } from '@/server/services/directfy'
+
+const log = childLogger('webhook:directfy')
 
 // Use service role to bypass RLS for webhook writes
 function getServiceClient() {
@@ -21,15 +24,22 @@ const STATUS_MAP = {
 export async function POST(request: Request) {
   const body = await request.text()
 
-  // Verify signature if secret is set
-  const webhookSecret = process.env.DIRECTFY_WEBHOOK_SECRET
-  if (webhookSecret) {
-    const signature = request.headers.get('x-directfy-signature') ?? ''
-    const { directfy } = await import('@/server/services/directfy')
-    const valid = await directfy.verifyWebhookSignature(body, signature, webhookSecret)
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-    }
+  // Signature is REQUIRED in all environments. Misconfiguration fails closed (503)
+  // so a silently unset secret cannot be used to spoof lead status updates.
+  const webhookSecret = serverEnv.DIRECTFY_WEBHOOK_SECRET
+  if (!webhookSecret) {
+    log.error('DIRECTFY_WEBHOOK_SECRET not configured — refusing webhook')
+    return NextResponse.json(
+      { error: 'Webhook not configured' },
+      { status: 503 }
+    )
+  }
+  const signature = request.headers.get('x-directfy-signature') ?? ''
+  const { directfy } = await import('@/server/services/directfy')
+  const valid = await directfy.verifyWebhookSignature(body, signature, webhookSecret)
+  if (!valid) {
+    log.warn('invalid webhook signature', { signaturePresent: signature.length > 0 })
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
   let payload: DirectfyWebhookPayload

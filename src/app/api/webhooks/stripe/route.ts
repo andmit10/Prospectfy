@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { serverEnv } from '@/lib/env.server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { childLogger } from '@/lib/logger'
+import { mapPriceToPlan, resolveOrgIdFromMetadata } from '@/server/services/stripe-helpers'
+
+const log = childLogger('webhook:stripe')
 
 /**
  * Stripe webhook handler — hybrid billing:
@@ -102,12 +106,6 @@ async function syncSubscriptionAddons(args: {
   }
 }
 
-function resolveOrgIdFromMetadata(metadata: Stripe.Metadata | null): string | null {
-  if (!metadata) return null
-  const id = metadata.organization_id ?? metadata.orbya_organization_id
-  return typeof id === 'string' && id.length > 0 ? id : null
-}
-
 async function updateOrgPlan(
   supabase: ReturnType<typeof createServiceClient>,
   orgId: string,
@@ -204,29 +202,13 @@ export async function POST(request: Request) {
       }
     }
   } catch (err) {
-    console.error('[stripe webhook] error:', err)
+    log.error('processing failed', {
+      eventId: event.id,
+      eventType: event.type,
+      error: err instanceof Error ? err.message : String(err),
+    })
     return NextResponse.json({ error: 'processing_failed' }, { status: 500 })
   }
 
   return NextResponse.json({ received: true })
-}
-
-/**
- * Map a primary Stripe price id to an Orbya plan. Ops populates this via
- * `STRIPE_PRICE_*` env vars; missing matches fall through to 'starter'
- * so the customer still gets access until the mapping catches up.
- */
-function mapPriceToPlan(priceId: string | null): string {
-  if (!priceId) return 'starter'
-  const envMap: Array<[string, string]> = [
-    [process.env.STRIPE_PRICE_STARTER ?? '', 'starter'],
-    [process.env.STRIPE_PRICE_PRO ?? '', 'pro'],
-    [process.env.STRIPE_PRICE_BUSINESS ?? '', 'business'],
-    [process.env.STRIPE_PRICE_AGENCY ?? '', 'agency'],
-    [process.env.STRIPE_PRICE_ENTERPRISE ?? '', 'enterprise'],
-  ]
-  for (const [envPrice, plan] of envMap) {
-    if (envPrice && priceId === envPrice) return plan
-  }
-  return 'starter'
 }
