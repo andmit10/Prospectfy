@@ -287,12 +287,21 @@ function ChannelSection({
               type="button"
               disabled={c.preview}
               onClick={() => !c.preview && onConnect(c)}
-              className="group flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:shadow-sm"
-              style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface-2)' }}
+              className={`group flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-all disabled:cursor-not-allowed enabled:hover:shadow-sm ${
+                c.preview ? 'sm:col-span-2 lg:col-span-3' : ''
+              }`}
+              style={{
+                borderColor: c.preview
+                  ? 'color-mix(in oklab, #F59E0B 30%, var(--border))'
+                  : 'var(--border)',
+                backgroundColor: c.preview
+                  ? 'color-mix(in oklab, #F59E0B 4%, var(--surface-2))'
+                  : 'var(--surface-2)',
+              }}
             >
               <div className="flex w-full items-center gap-2">
                 <span
-                  className="text-xs font-semibold text-[var(--text-primary)]"
+                  className="text-sm font-semibold text-[var(--text-primary)]"
                   style={{
                     fontFamily: 'var(--font-display), var(--font-sans), system-ui, sans-serif',
                   }}
@@ -305,18 +314,18 @@ function ChannelSection({
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-1)] hover:text-[var(--primary)]"
+                    className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-1)] hover:text-[var(--primary)]"
                     title="Abrir página do provedor em nova aba"
                   >
                     <ExternalLink className="h-3 w-3" />
-                    Ver planos
+                    {c.preview ? 'Documentação Meta' : 'Ver planos'}
                   </a>
                 )}
                 {c.preview && (
                   <span
-                    className="ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold uppercase"
+                    className="ml-auto rounded px-2 py-0.5 text-[10px] font-bold uppercase"
                     style={{
-                      backgroundColor: 'color-mix(in oklab, #F59E0B 12%, transparent)',
+                      backgroundColor: 'color-mix(in oklab, #F59E0B 14%, transparent)',
                       color: '#F59E0B',
                       letterSpacing: '0.06em',
                     }}
@@ -325,17 +334,31 @@ function ChannelSection({
                   </span>
                 )}
               </div>
-              <p className="line-clamp-2 text-[11px] text-[var(--text-secondary)]">
+              <p
+                className={`text-[var(--text-secondary)] ${
+                  c.preview ? 'text-sm' : 'line-clamp-2 text-xs'
+                }`}
+              >
                 {c.description}
               </p>
               {c.risk && (
-                <p className="flex items-start gap-1 text-[10px] text-amber-600">
-                  <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                  <span className="line-clamp-2">{c.risk}</span>
+                <p
+                  className={`flex items-start gap-1.5 text-amber-600 ${
+                    c.preview ? 'text-sm' : 'text-[11px]'
+                  }`}
+                >
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span className={c.preview ? '' : 'line-clamp-2'}>{c.risk}</span>
                 </p>
               )}
               {c.priceNote && (
-                <p className="text-[10px] text-[var(--text-tertiary)]">{c.priceNote}</p>
+                <p
+                  className={`text-[var(--text-tertiary)] ${
+                    c.preview ? 'text-xs' : 'text-[11px]'
+                  }`}
+                >
+                  {c.priceNote}
+                </p>
               )}
               {!c.preview && (
                 <span
