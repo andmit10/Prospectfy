@@ -15,19 +15,23 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 const STORAGE_KEY = 'orbya-theme'
 
+// Default theme for brand-new visitors (no localStorage entry yet). The
+// user can always override via the theme selector in /settings.
+const DEFAULT_THEME: Theme = 'light'
+
 /** Lazy initializer — runs once on client mount, never re-runs. */
 function readStoredTheme(): Theme {
-  if (typeof window === 'undefined') return 'dark'
+  if (typeof window === 'undefined') return DEFAULT_THEME
   try {
-    return (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? 'dark'
+    return (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? DEFAULT_THEME
   } catch {
-    return 'dark'
+    return DEFAULT_THEME
   }
 }
 
 /** Resolve a Theme to the actually-applied 'light' | 'dark'. */
 function resolveTheme(theme: Theme): 'light' | 'dark' {
-  if (typeof window === 'undefined') return theme === 'light' ? 'light' : 'dark'
+  if (typeof window === 'undefined') return theme === 'dark' ? 'dark' : 'light'
   if (theme === 'auto') {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   }
@@ -89,13 +93,13 @@ export function useTheme() {
 export const themeScript = `
 (function() {
   try {
-    var stored = localStorage.getItem('${STORAGE_KEY}') || 'dark';
+    var stored = localStorage.getItem('${STORAGE_KEY}') || '${DEFAULT_THEME}';
     var applied = stored === 'auto'
       ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
       : stored;
     document.documentElement.classList.add(applied);
   } catch (e) {
-    document.documentElement.classList.add('dark');
+    document.documentElement.classList.add('${DEFAULT_THEME}');
   }
 })();
 `.trim()
