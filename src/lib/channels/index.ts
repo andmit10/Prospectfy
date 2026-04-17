@@ -71,6 +71,8 @@ export type ProviderCatalogEntry = {
   webhookPath?: string
   /** Hide until the operator flips a feature flag (e.g. Meta review pending). */
   preview?: boolean
+  /** Public marketing/pricing page — opens in a new tab from the card. */
+  homepageUrl?: string
 }
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
@@ -98,6 +100,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/whatsapp/directfy',
+    homepageUrl: 'https://directfy.com',
   },
   {
     id: 'evolution',
@@ -119,6 +122,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/whatsapp/evolution',
+    homepageUrl: 'https://evolution-api.com',
   },
   {
     id: 'evolution_go',
@@ -174,6 +178,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/whatsapp/evolution_go',
+    homepageUrl: 'https://docs.evolutionfoundation.com.br/evolution-go',
   },
   {
     id: 'zapi',
@@ -189,6 +194,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/whatsapp/zapi',
+    homepageUrl: 'https://z-api.io/precos',
   },
   {
     id: 'generic_webhook',
@@ -232,6 +238,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/email/resend',
+    homepageUrl: 'https://resend.com/pricing',
   },
   {
     id: 'sendgrid',
@@ -246,6 +253,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/email/sendgrid',
+    homepageUrl: 'https://sendgrid.com/pricing',
   },
   {
     id: 'smtp',
@@ -279,6 +287,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/linkedin/unipile',
+    homepageUrl: 'https://www.unipile.com/pricing',
   },
   {
     id: 'meta_instagram',
@@ -300,6 +309,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     ],
     hasWebhook: true,
     webhookPath: '/api/webhooks/channels/instagram/meta_instagram',
+    homepageUrl: 'https://developers.facebook.com/docs/instagram-platform',
   },
 ]
 

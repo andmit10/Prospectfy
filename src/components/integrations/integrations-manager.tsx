@@ -27,6 +27,7 @@ import {
   Send,
   AlertTriangle,
   CheckCircle2,
+  ExternalLink,
   type LucideIcon,
 } from 'lucide-react'
 import { EvolutionGoQrDialog } from './evolution-go-qr-dialog'
@@ -53,6 +54,7 @@ type CatalogEntry = {
   hasWebhook: boolean
   webhookPath?: string
   preview?: boolean
+  homepageUrl?: string
 }
 
 type Integration = {
@@ -297,6 +299,19 @@ function ChannelSection({
                 >
                   {c.name}
                 </span>
+                {c.homepageUrl && (
+                  <a
+                    href={c.homepageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-1)] hover:text-[var(--primary)]"
+                    title="Abrir página do provedor em nova aba"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Ver planos
+                  </a>
+                )}
                 {c.preview && (
                   <span
                     className="ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold uppercase"
