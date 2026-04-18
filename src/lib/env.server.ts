@@ -7,6 +7,13 @@ const serverSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  // One price_id per plan. Optional so dev environments without Stripe
+  // still boot; the checkout mutation will fail with a clear error if the
+  // customer tries to subscribe to a plan whose env var is missing.
+  STRIPE_PRICE_STARTER: z.string().min(1).optional(),
+  STRIPE_PRICE_PRO: z.string().min(1).optional(),
+  STRIPE_PRICE_BUSINESS: z.string().min(1).optional(),
+  STRIPE_PRICE_AGENCY: z.string().min(1).optional(),
   DIRECTFY_API_URL: z.string().url().default('https://api.directfy.com'),
   DIRECTFY_WEBHOOK_SECRET: z.string().optional(),
   REDIS_URL: z.string().optional(),
@@ -34,6 +41,10 @@ export const serverEnv = serverSchema.parse({
   ANTHROPIC_API_KEY: e('ANTHROPIC_API_KEY'),
   STRIPE_SECRET_KEY: e('STRIPE_SECRET_KEY'),
   STRIPE_WEBHOOK_SECRET: e('STRIPE_WEBHOOK_SECRET'),
+  STRIPE_PRICE_STARTER: e('STRIPE_PRICE_STARTER'),
+  STRIPE_PRICE_PRO: e('STRIPE_PRICE_PRO'),
+  STRIPE_PRICE_BUSINESS: e('STRIPE_PRICE_BUSINESS'),
+  STRIPE_PRICE_AGENCY: e('STRIPE_PRICE_AGENCY'),
   DIRECTFY_API_URL: e('DIRECTFY_API_URL'),
   DIRECTFY_WEBHOOK_SECRET: e('DIRECTFY_WEBHOOK_SECRET'),
   REDIS_URL: e('REDIS_URL'),

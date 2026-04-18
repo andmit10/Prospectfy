@@ -1,8 +1,9 @@
 'use client'
 
 import { trpc } from '@/lib/trpc-client'
-import { Check, CreditCard, Zap, Users, Database, Bot } from 'lucide-react'
+import { Check, CreditCard, Loader2, Zap, Users, Database, Bot } from 'lucide-react'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 
 /**
@@ -72,6 +73,21 @@ const PLAN_FEATURES: Record<string, { title: string; price: string; features: st
 export function BillingOverview() {
   const { data: org } = trpc.organizations.current.useQuery()
 
+  // Checkout mutation — redirects to Stripe Checkout for the selected plan.
+  // Portal mutation lets paid customers manage their subscription.
+  const checkout = trpc.stripe.createCheckoutSession.useMutation({
+    onSuccess: ({ url }) => {
+      window.location.href = url
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const portal = trpc.stripe.createPortalSession.useMutation({
+    onSuccess: ({ url }) => {
+      window.location.href = url
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
   if (!org) {
     return (
       <div className="rounded-xl border p-6 text-sm text-[var(--text-tertiary)]"
@@ -104,10 +120,26 @@ export function BillingOverview() {
             </h2>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">{plan.price}</p>
           </div>
-          <Button variant="outline" size="sm" render={<Link href="#upgrade" />} nativeButton={false}>
-            <CreditCard className="mr-1 h-3.5 w-3.5" />
-            Gerenciar
-          </Button>
+          {currentPlan === 'trial' ? (
+            <Button variant="outline" size="sm" render={<Link href="#upgrade" />} nativeButton={false}>
+              <CreditCard className="mr-1 h-3.5 w-3.5" />
+              Fazer upgrade
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => portal.mutate()}
+              disabled={portal.isPending}
+            >
+              {portal.isPending ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CreditCard className="mr-1 h-3.5 w-3.5" />
+              )}
+              Gerenciar assinatura
+            </Button>
+          )}
         </div>
         <ul className="mt-4 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
           {plan.features.map((f) => (
@@ -155,15 +187,24 @@ export function BillingOverview() {
                   variant={isCurrent ? 'outline' : 'default'}
                   size="sm"
                   className="mt-4 w-full"
-                  disabled={isCurrent}
-                  render={
-                    isCurrent ? undefined : (
-                      <a href="/api/stripe/checkout?plan={planKey}" />
-                    )
-                  }
-                  nativeButton={!isCurrent ? false : undefined}
+                  disabled={isCurrent || checkout.isPending}
+                  onClick={() => {
+                    if (isCurrent) return
+                    checkout.mutate({
+                      plan: planKey as 'starter' | 'pro' | 'business' | 'agency',
+                    })
+                  }}
                 >
-                  {isCurrent ? 'Plano atual' : 'Assinar'}
+                  {checkout.isPending && checkout.variables?.plan === planKey ? (
+                    <>
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      Abrindo checkout...
+                    </>
+                  ) : isCurrent ? (
+                    'Plano atual'
+                  ) : (
+                    'Assinar'
+                  )}
                 </Button>
               </div>
             )

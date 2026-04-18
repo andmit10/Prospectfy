@@ -46,7 +46,7 @@ export function BillingCard() {
               Assine o plano Starter para ter acesso completo: envios ilimitados, agente de IA e suporte prioritário.
             </p>
             <Button
-              onClick={() => checkout.mutate()}
+              onClick={() => checkout.mutate({ plan: 'starter' })}
               disabled={checkout.isPending}
               className="w-full"
             >
