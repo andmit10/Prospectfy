@@ -125,6 +125,13 @@ type GeneratedLead = {
   telefones_extras?: string[]
   outros_decisores?: Decisor[]
   fontes_consultadas?: string[]
+  // Phase C — IA enrichment fields
+  decisores?: Array<Decisor & { principal?: boolean }>
+  mensagem_whatsapp?: string
+  mensagem_email_assunto?: string
+  mensagem_email_corpo?: string
+  justificativa_score?: string
+  horario_ideal?: string
 }
 
 type StatusFilter = 'all' | 'email' | 'linkedin' | 'partial' | 'pending' | 'cnpj_invalid'
@@ -429,17 +436,241 @@ function SourceBadge({ id }: { id: string }) {
 }
 
 /** Tabbed detail panel shown when a lead row is expanded */
+/**
+ * "Approach kit" panel — Phase C enrichment surfaces here.
+ *
+ * Shows everything the operator needs to send the first message right now:
+ *   - Score justification (why this lead is worth contacting)
+ *   - Recommended day + time window
+ *   - Pre-written WhatsApp message (with placeholders) + copy
+ *   - Pre-written email subject + body (with placeholders) + copy
+ *
+ * If the lead doesn't carry the enrichment fields (legacy generation
+ * before this feature shipped), we render a friendly empty state instead
+ * of broken half-empty sections.
+ */
+function ApproachPanel({ lead }: { lead: GeneratedLead }) {
+  const hasAny =
+    !!(lead.justificativa_score ?? '').trim() ||
+    !!(lead.horario_ideal ?? '').trim() ||
+    !!(lead.mensagem_whatsapp ?? '').trim() ||
+    !!(lead.mensagem_email_corpo ?? '').trim()
+
+  if (!hasAny) {
+    return (
+      <div
+        className="rounded-lg p-6 text-center"
+        style={{ backgroundColor: 'var(--surface-1)', border: '1px dashed var(--border)' }}
+      >
+        <Sparkles
+          className="mx-auto mb-2 h-5 w-5"
+          style={{ color: 'var(--text-tertiary)' }}
+        />
+        <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
+          Sem kit de abordagem disponível para esse lead
+        </p>
+        <p className="mt-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+          Gere novamente para receber a justificativa do score, horário ideal e
+          mensagens prontas (WhatsApp + email) personalizadas pra esse decisor.
+        </p>
+      </div>
+    )
+  }
+
+  // Reusable copy-with-toast button
+  function CopyButton({ text }: { text: string }) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          navigator.clipboard.writeText(text)
+          toast.success('Copiado!')
+        }}
+        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors"
+        style={{
+          backgroundColor: 'color-mix(in oklab, var(--primary) 10%, transparent)',
+          color: 'var(--primary)',
+        }}
+      >
+        <Copy className="h-3 w-3" /> Copiar
+      </button>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Justificativa + horário lado a lado */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {(lead.justificativa_score ?? '').trim() && (
+          <div
+            className="rounded-lg p-4"
+            style={{
+              backgroundColor:
+                'color-mix(in oklab, var(--primary) 6%, var(--surface-2))',
+              border: '1px solid color-mix(in oklab, var(--primary) 25%, transparent)',
+            }}
+          >
+            <div className="mb-2 flex items-center gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--primary)' }} />
+              <p
+                className="text-[10px] font-bold uppercase"
+                style={{ color: 'var(--primary)', letterSpacing: '0.06em' }}
+              >
+                Por que esse lead é quente
+              </p>
+            </div>
+            <p
+              className="text-sm leading-relaxed"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {lead.justificativa_score}
+            </p>
+          </div>
+        )}
+        {(lead.horario_ideal ?? '').trim() && (
+          <div
+            className="rounded-lg p-4"
+            style={{
+              backgroundColor: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+            }}
+          >
+            <div className="mb-2 flex items-center gap-1.5">
+              <CalendarDays
+                className="h-3.5 w-3.5"
+                style={{ color: 'var(--text-secondary)' }}
+              />
+              <p
+                className="text-[10px] font-bold uppercase"
+                style={{ color: 'var(--text-tertiary)', letterSpacing: '0.06em' }}
+              >
+                Horário ideal de envio
+              </p>
+            </div>
+            <p
+              className="text-sm leading-relaxed"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {lead.horario_ideal}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Mensagem WhatsApp */}
+      {(lead.mensagem_whatsapp ?? '').trim() && (
+        <div
+          className="rounded-lg overflow-hidden"
+          style={{ border: '1px solid var(--border)' }}
+        >
+          <div
+            className="flex items-center justify-between px-4 py-2.5"
+            style={{
+              backgroundColor: 'color-mix(in oklab, #25D366 8%, var(--surface-2))',
+              borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <Phone className="h-3.5 w-3.5" style={{ color: '#25D366' }} />
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Mensagem WhatsApp pronta
+              </p>
+            </div>
+            <CopyButton text={lead.mensagem_whatsapp ?? ''} />
+          </div>
+          <div className="p-4" style={{ backgroundColor: 'var(--surface-1)' }}>
+            <pre
+              className="whitespace-pre-wrap font-sans text-sm leading-relaxed"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {lead.mensagem_whatsapp}
+            </pre>
+            <p
+              className="mt-3 text-[10px]"
+              style={{ color: 'var(--text-tertiary)' }}
+            >
+              Edite os placeholders [Nome], [Empresa Usuário] etc. antes de enviar.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Mensagem Email */}
+      {(lead.mensagem_email_corpo ?? '').trim() && (
+        <div
+          className="rounded-lg overflow-hidden"
+          style={{ border: '1px solid var(--border)' }}
+        >
+          <div
+            className="flex items-center justify-between px-4 py-2.5"
+            style={{
+              backgroundColor: 'color-mix(in oklab, #3B82F6 8%, var(--surface-2))',
+              borderBottom: '1px solid var(--border)',
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <Mail className="h-3.5 w-3.5" style={{ color: '#3B82F6' }} />
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                E-mail pronto
+              </p>
+            </div>
+            <CopyButton
+              text={`Assunto: ${lead.mensagem_email_assunto ?? ''}\n\n${lead.mensagem_email_corpo ?? ''}`}
+            />
+          </div>
+          <div className="space-y-3 p-4" style={{ backgroundColor: 'var(--surface-1)' }}>
+            {(lead.mensagem_email_assunto ?? '').trim() && (
+              <div>
+                <p
+                  className="mb-1 text-[10px] font-bold uppercase"
+                  style={{ color: 'var(--text-tertiary)', letterSpacing: '0.06em' }}
+                >
+                  Assunto
+                </p>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {lead.mensagem_email_assunto}
+                </p>
+              </div>
+            )}
+            <div>
+              <p
+                className="mb-1 text-[10px] font-bold uppercase"
+                style={{ color: 'var(--text-tertiary)', letterSpacing: '0.06em' }}
+              >
+                Corpo
+              </p>
+              <pre
+                className="whitespace-pre-wrap font-sans text-sm leading-relaxed"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {lead.mensagem_email_corpo}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
-  const [tab, setTab] = useState<'empresa' | 'decisor' | 'website' | 'historico'>('empresa')
+  const [tab, setTab] = useState<'empresa' | 'decisor' | 'mensagem' | 'website' | 'historico'>('empresa')
 
   const tabs = [
     { id: 'empresa', label: 'Empresa', icon: Building2 },
     { id: 'decisor', label: 'Decisor', icon: UserSearch },
+    { id: 'mensagem', label: 'Abordagem', icon: Sparkles },
     { id: 'website', label: 'Website', icon: Globe },
     { id: 'historico', label: 'Histórico', icon: BarChart3 },
   ] as const
 
-  const outrosDecisores = lead.outros_decisores ?? []
+  // Prefer the new `decisores` array from Phase C; fallback to legacy
+  // `outros_decisores`. We always exclude the principal from the "others"
+  // list — its info is already shown in the dedicated principal card.
+  const outrosDecisores = lead.decisores
+    ? lead.decisores.filter((d) => !d.principal)
+    : (lead.outros_decisores ?? [])
   const totalDecisores = 1 + outrosDecisores.length
   const enderecoCompleto = lead.endereco_completo
     ?? [lead.logradouro && `${lead.logradouro}${lead.numero ? `, ${lead.numero}` : ''}`, lead.bairro, lead.cep, lead.cidade && lead.estado && `${lead.cidade}/${lead.estado}`]
@@ -611,8 +842,8 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
                     </div>
                   )}
                   {lead.linkedin_url && (
-                    <a href={lead.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-2 text-xs hover:underline" style={{ color: '#0A66C2' }}>
-                      <Link2 className="h-3 w-3" /> LinkedIn <ExternalLink className="h-3 w-3" />
+                    <a href={lead.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-2 text-xs hover:underline" style={{ color: '#0A66C2' }} title="Abre uma busca no LinkedIn — perfis sugeridos podem variar">
+                      <Search className="h-3 w-3" /> Buscar no LinkedIn <ExternalLink className="h-3 w-3" />
                     </a>
                   )}
                 </div>
@@ -626,7 +857,7 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
                   <div className="space-y-2">
                     {d.email && <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-primary)' }}><Mail className="h-3 w-3" style={{ color: 'var(--text-secondary)' }} /><CopyChip value={d.email} /></div>}
                     {d.whatsapp && <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-primary)' }}><Phone className="h-3 w-3" style={{ color: 'var(--text-secondary)' }} /><CopyChip value={d.whatsapp} /></div>}
-                    {d.linkedin_url && <a href={d.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-2 text-xs hover:underline" style={{ color: '#0A66C2' }}><Link2 className="h-3 w-3" /> LinkedIn <ExternalLink className="h-3 w-3" /></a>}
+                    {d.linkedin_url && <a href={d.linkedin_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-2 text-xs hover:underline" style={{ color: '#0A66C2' }} title="Abre uma busca no LinkedIn"><Search className="h-3 w-3" /> Buscar no LinkedIn <ExternalLink className="h-3 w-3" /></a>}
                   </div>
                 </div>
               ))}
@@ -638,6 +869,10 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
               )}
             </div>
           </div>
+        )}
+
+        {tab === 'mensagem' && (
+          <ApproachPanel lead={lead} />
         )}
 
         {tab === 'website' && (

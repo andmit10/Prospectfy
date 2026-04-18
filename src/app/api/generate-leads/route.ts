@@ -40,8 +40,24 @@ const inputSchema = z.object({
   fontes: z.array(z.string()).default(['google_maps']),
 })
 
+// A single decision-maker. We deliberately use a search URL (not a direct
+// /in/<slug> URL) because the LLM has no way to verify a profile actually
+// exists — search URLs always work and let the user click through to the
+// real result.
+const decisorSchema = z.object({
+  nome: z.string(),
+  cargo: z.string().optional().default(''),
+  email: z.string().optional().default(''),
+  whatsapp: z.string().optional().default(''),
+  linkedin_url: z.string().optional().default(''),
+  principal: z.boolean().optional().default(false),
+})
+
 const leadSchema = z.object({
   empresa_nome: z.string(),
+  // Legacy single-decisor fields kept for backwards compat with downstream
+  // code (DataTable column, exports, agent prompt vars). We populate these
+  // from `decisores[0]` when the LLM returns the array form.
   decisor_nome: z.string(),
   decisor_cargo: z.string().optional().default(''),
   segmento: z.string().optional().default(''),
@@ -71,6 +87,13 @@ const leadSchema = z.object({
     linkedin_ativo: 0,
     porte_match: 0,
   }),
+  // ─── New enrichment fields (Phase C) ───
+  decisores: z.array(decisorSchema).optional().default([]),
+  mensagem_whatsapp: z.string().optional().default(''),
+  mensagem_email_assunto: z.string().optional().default(''),
+  mensagem_email_corpo: z.string().optional().default(''),
+  justificativa_score: z.string().optional().default(''),
+  horario_ideal: z.string().optional().default(''),
 })
 
 // SSE helper: send a JSON event to the stream
@@ -267,13 +290,31 @@ RETORNE APENAS um array JSON puro (sem \`\`\`json nem texto adicional). Cada lea
   "empresa_nome": "Nome Real da Empresa Ltda",
   "decisor_nome": "Nome Completo Real",
   "decisor_cargo": "${cargos_alvo?.[0] || cargo_alvo || 'Diretor'}",
+  "decisores": [
+    {
+      "nome": "Nome do decisor principal",
+      "cargo": "${cargos_alvo?.[0] || cargo_alvo || 'Diretor'}",
+      "email": "nome@empresa.com.br",
+      "whatsapp": "5531999990001",
+      "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Nome+Sobrenome+Empresa",
+      "principal": true
+    },
+    {
+      "nome": "Nome de um sócio ou diretor secundário",
+      "cargo": "Sócio / Diretor Comercial / Diretor Financeiro",
+      "email": "nome2@empresa.com.br",
+      "whatsapp": "5531999990002",
+      "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Nome2+Empresa",
+      "principal": false
+    }
+  ],
   "segmento": "${segmento}",
   "cidade": "${cidade || 'São Paulo'}",
   "estado": "${estado || 'SP'}",
   "email": "nome@empresa.com.br",
   "whatsapp": "5531999990001",
   "telefone": "(31) 3000-0001",
-  "linkedin_url": "https://linkedin.com/in/nome-sobrenome",
+  "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Nome+Sobrenome+Empresa",
   "cnpj": "12.345.678/0001-90",
   "cnpj_ativo": true,
   "website": "https://www.empresa.com.br",
@@ -290,23 +331,34 @@ RETORNE APENAS um array JSON puro (sem \`\`\`json nem texto adicional). Cada lea
     "email_validado": 15,
     "linkedin_ativo": 20,
     "porte_match": 10
-  }
+  },
+  "justificativa_score": "Empresa com X funcionários no segmento certo, decisor com cargo de decisão de compra, presente no LinkedIn e Google Maps com boa reputação. Alta probabilidade de resposta porque [razão específica].",
+  "horario_ideal": "Segunda a quarta, 9h às 11h ou 14h às 16h (horário comercial onde decisores B2B costumam estar mais responsivos)",
+  "mensagem_whatsapp": "Olá [Nome]! Sou da [Empresa Usuário] e ajudamos [tipo de empresa] como a [Empresa Lead] a [benefício específico]. Vi que vocês [observação personalizada baseada no segmento/porte]. Faz sentido marcarmos 15min essa semana pra eu te mostrar como funciona?",
+  "mensagem_email_assunto": "Assunto curto e instigante (5-8 palavras)",
+  "mensagem_email_corpo": "Olá [Nome],\\n\\nParágrafo 1: contexto + por que estou entrando em contato com a [Empresa].\\n\\nParágrafo 2: benefício específico que entregamos pra empresas como a sua.\\n\\nParágrafo 3: CTA claro — proposta de reunião curta.\\n\\nAbraço,\\n[Seu Nome]"
 }]
 
 REGRAS OBRIGATÓRIAS:
 - Nomes realistas de empresas brasileiras do segmento "${segmento}" em ${regiao}
 - Decisores com nomes brasileiros completos e cargos reais
+- decisores: array com 2-4 decisores por empresa (1 principal + sócios/diretores secundários). O primeiro deve ter principal: true e bater com decisor_nome do nível superior.
+- linkedin_url SEMPRE em formato de BUSCA (https://www.linkedin.com/search/results/people/?keywords=...). NUNCA gere URLs do tipo /in/<slug> porque você não tem como verificar se existem.
 - WhatsApp: 55 + DDD da região + 9 dígitos (13 dígitos total)
 - CNPJ: formato XX.XXX.XXX/0001-XX com dígitos plausíveis
 - rating_maps: nota de 1.0 a 5.0 (com 1 casa decimal)
 - total_avaliacoes: número entre 5 e 500
 - porte: um de "MEI", "ME", "EPP", "Média", "Grande"
 - funcionarios_estimados: número compatível com o porte
-- website: domínio institucional plausível da empresa (https://www.empresa.com.br). Use variações do nome real da empresa. NUNCA repita o exemplo — gere domínios realistas. Se a empresa for muito pequena, pode ser null.
+- website: domínio institucional plausível da empresa. Use variações do nome real. NUNCA repita o exemplo — gere domínios realistas. Se a empresa for muito pequena, pode ser null.
 - razao_social: nome jurídico completo em CAIXA ALTA terminando em LTDA/S.A./EIRELI/ME
 - nome_fantasia: nome comercial curto (sem o sufixo jurídico)
 - score: 0-100, soma dos score_detalhes
-- score_detalhes: cada campo 0-25 pontos, somando = score total (máx 100 se tiver campo extra 5)
+- justificativa_score: 1-2 frases concretas explicando POR QUE esse lead é quente. Cite dados específicos (porte, presença online, cargo). NÃO seja genérico.
+- horario_ideal: 1 frase com dia e janela de horário recomendada para o primeiro contato.
+- mensagem_whatsapp: 2-3 parágrafos curtos, tom profissional mas casual (WhatsApp brasileiro). Use [Nome] e [Empresa Usuário] como placeholders. Termina com CTA pra reunião de 15min.
+- mensagem_email_assunto: curto, direto, instigante.
+- mensagem_email_corpo: 3 parágrafos. Use \\n para quebras. Use [Nome], [Empresa], [Seu Nome] como placeholders.
 - Todos os ${batchSize} leads DIFERENTES entre si
 - E-mails com domínio da empresa (.com.br ou .com)
 - NÃO use nomes genéricos — seja específico e realista
@@ -328,7 +380,10 @@ REGRAS OBRIGATÓRIAS:
         })
 
         // Chunking: split into batches of max 25 leads to stay within token limits
-        const BATCH_SIZE = 25
+        // Smaller batches now that each lead is bigger (decisores array +
+        // 4 enrichment fields = ~3x payload). 15 keeps us well under the
+        // 16k output token cap.
+        const BATCH_SIZE = 15
         const batches: number[] = []
         let remaining = quantidade
         while (remaining > 0) {
@@ -348,7 +403,8 @@ REGRAS OBRIGATÓRIAS:
         // cost) is recorded per batch by the Gateway.
         const batchResults = await Promise.all(
           batches.map(async (batchSize) => {
-            const maxTokens = Math.min(16000, Math.max(4096, batchSize * 400))
+            // ~900 tokens/lead now (was ~400) due to decisores + enrichment.
+            const maxTokens = Math.min(16000, Math.max(4096, batchSize * 900))
             try {
               const result = await llm.extract<unknown>({
                 user: buildPrompt(batchSize),
