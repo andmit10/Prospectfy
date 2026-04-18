@@ -1292,6 +1292,10 @@ export function LeadGenerator() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [isGenerating, setIsGenerating] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
+  // Phase B: "Pesquisar empresa" mode. Kept out of react-hook-form because
+  // the search form has a totally different shape (single input, no filters).
+  const [mode, setMode] = useState<'discover' | 'search'>('discover')
+  const [empresaBusca, setEmpresaBusca] = useState('')
   const [importResult, setImportResult] = useState<
     | { type: 'success'; imported: number; skipped: number }
     | { type: 'error'; message: string }
@@ -1343,6 +1347,9 @@ export function LeadGenerator() {
     setLogs([])
     setStats({})
     setRequestedQty(values.quantidade ?? 0)
+    // Discover mode always sends mode='discover'; form values fill the body as before.
+    // Search mode is handled in onSubmitSearch below.
+    ;(values as unknown as Record<string, unknown>).mode = 'discover'
 
     try {
       const res = await fetch('/api/generate-leads', {
@@ -1480,13 +1487,188 @@ export function LeadGenerator() {
     setResults([]); setSelected(new Set()); setPipeline(INITIAL_PIPELINE); setProgress(0); setLogs([]); setStats({})
   }
 
+  /**
+   * Submit path for mode='search'. Bypasses react-hook-form because the
+   * shape is different — a single string. Sends mode=search + empresa_busca
+   * and lets the API handle the single-lead enrichment flow.
+   */
+  async function onSubmitSearch() {
+    const query = empresaBusca.trim()
+    if (query.length < 2) {
+      toast.error('Informe um nome ou CNPJ para pesquisar')
+      return
+    }
+    setResults([])
+    setSelected(new Set())
+    setIsGenerating(true)
+    setPipeline(INITIAL_PIPELINE)
+    setProgress(0)
+    setLogs([])
+    setStats({})
+    setRequestedQty(1)
+
+    try {
+      const res = await fetch('/api/generate-leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'search', empresa_busca: query }),
+      })
+      const reader = res.body?.getReader()
+      if (!reader) { toast.error('Erro de conexão'); return }
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop() ?? ''
+        for (const event of events) {
+          const dataLine = event.split('\n').find((l) => l.startsWith('data: '))
+          if (!dataLine) continue
+          const data = JSON.parse(dataLine.slice(6))
+          if (data.type === 'progress') {
+            setPipeline((prev) =>
+              prev.map((s) =>
+                s.id === data.step ? { ...s, status: data.status, message: data.message } : s
+              )
+            )
+            addLog(data.message, data.status === 'done' ? 'success' : 'info')
+            const stepIndex = INITIAL_PIPELINE.findIndex((s) => s.id === data.step)
+            if (data.status === 'done') {
+              setProgress(Math.min(((stepIndex + 1) / INITIAL_PIPELINE.length) * 100, 100))
+            } else {
+              setProgress(Math.min(((stepIndex + 0.5) / INITIAL_PIPELINE.length) * 100, 95))
+            }
+          } else if (data.type === 'complete') {
+            setResults(data.leads ?? [])
+            setStats(data.stats ?? {})
+            setProgress(100)
+          } else if (data.type === 'error') {
+            toast.error(data.message || 'Erro ao pesquisar empresa')
+          }
+        }
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao pesquisar empresa')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
   const hasResults = results.length > 0 && !isGenerating
   const allSelected = results.length > 0 && selected.size === results.length
 
   return (
     <div className="space-y-4">
 
-      {/* ── Form + Filtros ── */}
+      {/* ── Mode toggle: Descobrir vs Pesquisar ── */}
+      <div
+        className="inline-flex items-center rounded-full p-1"
+        style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}
+      >
+        <button
+          type="button"
+          onClick={() => setMode('discover')}
+          disabled={isGenerating}
+          className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            backgroundColor: mode === 'discover' ? 'var(--primary)' : 'transparent',
+            color: mode === 'discover' ? 'var(--primary-foreground, #fff)' : 'var(--text-secondary)',
+          }}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          Descobrir leads
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('search')}
+          disabled={isGenerating}
+          className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          style={{
+            backgroundColor: mode === 'search' ? 'var(--primary)' : 'transparent',
+            color: mode === 'search' ? 'var(--primary-foreground, #fff)' : 'var(--text-secondary)',
+          }}
+        >
+          <Search className="h-3.5 w-3.5" />
+          Pesquisar empresa
+        </button>
+      </div>
+
+      {/* ── Search form (modo Pesquisar empresa) ── */}
+      {mode === 'search' && (
+        <div
+          className="rounded-xl p-5"
+          style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}
+        >
+          <div className="mb-3">
+            <h2
+              className="text-base font-semibold"
+              style={{
+                color: 'var(--text-primary)',
+                fontFamily:
+                  'var(--font-display), var(--font-sans), system-ui, sans-serif',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              Pesquisar empresa específica
+            </h2>
+            <p className="mt-0.5 text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              Use quando você já sabe qual empresa quer prospectar — a IA enriquece
+              com decisores, mensagem pronta e justificativa. 1 lead por busca.
+            </p>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              onSubmitSearch()
+            }}
+            className="flex flex-col gap-3 sm:flex-row"
+          >
+            <div className="flex-1">
+              <label
+                className="mb-1 block text-[10px] font-semibold tracking-wide"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                <Building2 className="mr-1 inline h-3 w-3" />
+                NOME DA EMPRESA OU CNPJ
+              </label>
+              <Input
+                value={empresaBusca}
+                onChange={(e) => setEmpresaBusca(e.target.value)}
+                placeholder="Ex: Sankhya Gestão de Negócios ou 03.571.875/0001-00"
+                disabled={isGenerating}
+                autoFocus
+              />
+              <p className="mt-1 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                Dica: CNPJ resolve direto; pelo nome a IA deduz o mais provável.
+              </p>
+            </div>
+            <Button
+              type="submit"
+              size="lg"
+              disabled={isGenerating || empresaBusca.trim().length < 2}
+              className="shrink-0 self-end"
+              style={{ backgroundColor: 'var(--primary)', color: 'var(--primary-foreground, #fff)' }}
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  Pesquisando...
+                </>
+              ) : (
+                <>
+                  <Search className="mr-1.5 h-4 w-4" />
+                  Pesquisar
+                </>
+              )}
+            </Button>
+          </form>
+        </div>
+      )}
+
+      {/* ── Form + Filtros (modo Descobrir) ── */}
+      {mode === 'discover' && (
       <div className="rounded-xl p-5" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -1938,6 +2120,7 @@ export function LeadGenerator() {
           </form>
         </Form>
       </div>
+      )}
 
       {/* ── Pipeline + Log ── */}
       {(isGenerating || hasResults) && (

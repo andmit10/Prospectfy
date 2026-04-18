@@ -14,14 +14,20 @@ import { z } from 'zod'
 
 const log = childLogger('api:generate-leads')
 
+// Two modes:
+//   * 'discover' — classic flow. Filters + quantity, returns N leads.
+//   * 'search'   — enrich a single company by name or CNPJ, returns 1 lead.
+//                  Skips filters entirely; only `empresa_busca` is required.
 const inputSchema = z.object({
-  segmento: z.string().min(1),
+  mode: z.enum(['discover', 'search']).default('discover'),
+  // Discover-mode fields (required when mode='discover')
+  segmento: z.string().optional().default(''),
   cidade: z.string().optional(),
   estado: z.string().optional(),
   bairro: z.string().optional(),
   regiao: z.string().optional(),
   raio_km: z.number().optional(),
-  quantidade: z.number().min(10).max(500).default(50),
+  quantidade: z.number().min(1).max(500).default(50),
   cargo_alvo: z.string().optional(),
   cargos_alvo: z.array(z.string()).optional(),
   rating_minimo: z.number().min(0).max(5).default(0),
@@ -38,6 +44,26 @@ const inputSchema = z.object({
   exige_linkedin: z.boolean().optional(),
   excluir_termos: z.array(z.string()).optional(),
   fontes: z.array(z.string()).default(['google_maps']),
+  // Search-mode field (required when mode='search')
+  empresa_busca: z.string().optional(),
+}).superRefine((val, ctx) => {
+  if (val.mode === 'search') {
+    if (!val.empresa_busca || val.empresa_busca.trim().length < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['empresa_busca'],
+        message: 'Informe um nome de empresa ou CNPJ para a busca',
+      })
+    }
+  } else {
+    if (!val.segmento || val.segmento.trim().length < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['segmento'],
+        message: 'Segmento é obrigatório no modo descobrir',
+      })
+    }
+  }
 })
 
 // A single decision-maker. We deliberately use a search URL (not a direct
@@ -187,12 +213,19 @@ export async function POST(request: NextRequest) {
           return
         }
 
-        // Trim the requested quantity to the remaining trial allowance.
+        // Search mode always asks for exactly 1 company, so trial allowance
+        // only bounds the discover flow.
+        const isSearch = input.data.mode === 'search'
+        if (isSearch) {
+          input.data.quantidade = 1
+        }
+
+        // Trim the requested quantity to the remaining trial allowance (discover only).
         const remainingAllowance =
           trial.plan === 'trial'
             ? Math.max(0, trial.leadsLimit - trial.leadsGenerated)
             : Number.POSITIVE_INFINITY
-        if (input.data.quantidade > remainingAllowance) {
+        if (!isSearch && input.data.quantidade > remainingAllowance) {
           input.data.quantidade = remainingAllowance
           sendEvent(controller, encoder, {
             type: 'progress',
@@ -211,6 +244,7 @@ export async function POST(request: NextRequest) {
           faturamento_min, anos_empresa_min,
           exige_website, exige_email, exige_linkedin,
           excluir_termos,
+          empresa_busca,
         } = input.data
 
         const regiao = regiaoCustom
@@ -220,12 +254,14 @@ export async function POST(request: NextRequest) {
           ? cargos_alvo.join(', ')
           : cargo_alvo || 'CEO, Diretor, Gerente ou Sócio'
 
-        // Step 1: Maps
+        // Step 1: Maps (different message per mode)
         sendEvent(controller, encoder, {
           type: 'progress',
           step: 'maps',
           status: 'running',
-          message: `Buscando empresas de "${segmento}" em ${regiao}...`,
+          message: isSearch
+            ? `Pesquisando "${empresa_busca}"...`
+            : `Buscando empresas de "${segmento}" em ${regiao}...`,
         })
 
         // Legacy env check kept for backwards-compat — Gateway also honors it
@@ -365,12 +401,66 @@ REGRAS OBRIGATÓRIAS:
 - RESPONDA APENAS COM O ARRAY JSON — NENHUM TEXTO ANTES OU DEPOIS`
         }
 
+        // Search-mode prompt: enrich a single company by name or CNPJ.
+        // Returns a single-item array to keep the parsing path identical to
+        // discover-mode (downstream code treats everything as an array).
+        function buildSearchPrompt(): string {
+          const query = (empresa_busca ?? '').trim()
+          const looksLikeCnpj = /\d{2}[.\-\/]?\d{3}[.\-\/]?\d{3}[.\-\/]?\d{4}[.\-\/]?\d{2}/.test(query)
+          return `Você é um sistema avançado de enriquecimento de empresas B2B brasileiras.
+Retorne os dados da empresa "${query}" em formato de lead enriquecido.
+${looksLikeCnpj ? 'A query é um CNPJ — use exatamente esse CNPJ e deduza o resto.' : 'A query é um nome — deduza o CNPJ mais plausível e os demais dados.'}
+
+Se você NÃO tiver dados confiáveis sobre essa empresa específica, ainda assim retorne um
+lead com os dados mais prováveis baseados no nome/CNPJ. Use o nome como razão social
+formal e deduza nome_fantasia, segmento, porte e decisores típicos do setor.
+
+RETORNE APENAS um array JSON com EXATAMENTE 1 item no mesmo formato da geração normal:
+[{
+  "empresa_nome": "Nome da empresa",
+  "decisor_nome": "Nome do decisor principal",
+  "decisor_cargo": "Cargo (CEO, Diretor, Sócio, etc.)",
+  "decisores": [
+    { "nome": "...", "cargo": "...", "email": "...", "whatsapp": "...", "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=...", "principal": true },
+    { "nome": "...", "cargo": "...", "email": "...", "whatsapp": "...", "linkedin_url": "...", "principal": false }
+  ],
+  "segmento": "Segmento da empresa",
+  "cidade": "Cidade", "estado": "UF",
+  "email": "contato@empresa.com.br",
+  "whatsapp": "5531999990001",
+  "telefone": "(31) 3000-0001",
+  "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Empresa",
+  "cnpj": "XX.XXX.XXX/0001-XX",
+  "cnpj_ativo": true,
+  "website": "https://www.empresa.com.br",
+  "rating_maps": 4.5, "total_avaliacoes": 127,
+  "porte": "ME", "funcionarios_estimados": 15,
+  "razao_social": "EMPRESA LTDA", "nome_fantasia": "Empresa",
+  "score": 78,
+  "score_detalhes": { "maps_presenca": 20, "decisor_encontrado": 25, "email_validado": 15, "linkedin_ativo": 20, "porte_match": 10 },
+  "justificativa_score": "Por que essa empresa é um alvo quente (1-2 frases concretas).",
+  "horario_ideal": "Dia + janela de horário recomendada para o primeiro contato.",
+  "mensagem_whatsapp": "WhatsApp pronto com [Nome], [Empresa Usuário] como placeholders, CTA para reunião de 15min.",
+  "mensagem_email_assunto": "Assunto curto e instigante",
+  "mensagem_email_corpo": "Email em 3 parágrafos usando placeholders [Nome], [Empresa], [Seu Nome]."
+}]
+
+REGRAS:
+- linkedin_url SEMPRE em formato de busca. NUNCA invente /in/<slug>.
+- 2-4 decisores por empresa.
+- Se a empresa é conhecida (grande ou pública), use dados reais. Se desconhecida,
+  dedução baseada no setor + porte é aceitável — sinalize na justificativa_score.
+- RESPONDA APENAS COM O ARRAY JSON.`
+        }
+
         // Step 2: Decisor
         sendEvent(controller, encoder, {
           type: 'progress',
           step: 'maps',
           status: 'done',
-          message: `${quantidade} empresas encontradas no Google Maps`,
+          message: isSearch
+            ? `Empresa "${empresa_busca}" localizada`
+            : `${quantidade} empresas encontradas no Google Maps`,
         })
         sendEvent(controller, encoder, {
           type: 'progress',
@@ -407,7 +497,7 @@ REGRAS OBRIGATÓRIAS:
             const maxTokens = Math.min(16000, Math.max(4096, batchSize * 900))
             try {
               const result = await llm.extract<unknown>({
-                user: buildPrompt(batchSize),
+                user: isSearch ? buildSearchPrompt() : buildPrompt(batchSize),
                 // We accept any JSON shape — the batched prompt returns a raw
                 // array. extractJson handles markdown fences + partial JSON.
                 schema: { type: 'array' },
