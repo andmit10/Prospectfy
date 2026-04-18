@@ -1,4 +1,5 @@
 import { FeatureFlagsEditor } from '@/components/admin/feature-flags-editor'
+import { FeatureFlagsHelp } from '@/components/admin/feature-flags-help'
 
 export default function AdminFlagsPage() {
   return (
@@ -10,6 +11,7 @@ export default function AdminFlagsPage() {
           escrita restrita a super-admins.
         </p>
       </div>
+      <FeatureFlagsHelp />
       <FeatureFlagsEditor />
     </div>
   )
