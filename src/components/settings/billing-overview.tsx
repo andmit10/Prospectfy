@@ -169,6 +169,40 @@ export function BillingOverview() {
             )
           })}
         </div>
+
+        {/* Enterprise — negotiated, no self-serve checkout */}
+        {currentPlan !== 'enterprise' && (
+          <div
+            className="mt-3 rounded-xl border p-5"
+            style={{
+              borderColor: 'color-mix(in oklab, var(--primary) 25%, var(--border))',
+              backgroundColor:
+                'color-mix(in oklab, var(--primary) 4%, var(--surface-1))',
+            }}
+          >
+            <div className="flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-[var(--text-primary)]">
+                  {PLAN_FEATURES.enterprise.title}
+                </p>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  {PLAN_FEATURES.enterprise.price} ·{' '}
+                  {PLAN_FEATURES.enterprise.features.join(' · ')}
+                </p>
+              </div>
+              <a
+                href="mailto:comercial@prospectfy.com.br?subject=Interesse%20no%20plano%20Enterprise&body=Ol%C3%A1%2C%20gostaria%20de%20saber%20mais%20sobre%20o%20plano%20Enterprise%20do%20Prospectfy."
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-colors"
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-foreground, #fff)',
+                }}
+              >
+                Fale com vendas
+              </a>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Add-ons */}

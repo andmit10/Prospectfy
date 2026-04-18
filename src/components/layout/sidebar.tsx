@@ -20,6 +20,21 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Logo } from '@/components/brand/logo'
 import { OrgSwitcher } from '@/components/layout/org-switcher'
 import { AdminSidebarLink } from '@/components/layout/admin-sidebar-link'
+import { trpc } from '@/lib/trpc-client'
+
+// Friendly names per plan for the footer badge.
+const PLAN_LABEL: Record<string, string> = {
+  trial: 'Plano Trial',
+  starter: 'Plano Starter',
+  pro: 'Plano Pro',
+  business: 'Plano Business',
+  agency: 'Plano Agency',
+  enterprise: 'Enterprise',
+}
+// Plans that should show the "Upgrade" affordance in the footer badge.
+// Enterprise is negotiated (no self-serve checkout), so we hide the link
+// for it too.
+const PLANS_WITH_UPGRADE = new Set(['trial', 'starter', 'pro'])
 
 type NavSection = {
   title?: string
@@ -77,6 +92,16 @@ function readCollapsed(): boolean {
 export function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState<boolean>(readCollapsed)
+
+  // Pull the current org's plan for the footer badge. Staletime: 60s is
+  // plenty — plan changes flow through Stripe webhook + admin UI, both
+  // of which invalidate the query via mutations.
+  const { data: org } = trpc.organizations.current.useQuery(undefined, {
+    staleTime: 60_000,
+  })
+  const plan = (org?.plan as string | undefined) ?? 'trial'
+  const planLabel = PLAN_LABEL[plan] ?? `Plano ${plan}`
+  const canUpgrade = PLANS_WITH_UPGRADE.has(plan)
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -236,33 +261,39 @@ export function Sidebar() {
       {/* Footer — plan badge + single account menu (org switcher + user + logout all inside).
           `shrink-0` so ScrollArea compresses instead of the footer. */}
       <div className={cn('shrink-0 border-t border-[var(--border)] space-y-1.5', collapsed ? 'p-2' : 'p-2.5')}>
-        {/* Plan badge */}
+        {/* Plan badge — now dynamic, reads ctx org plan */}
         {collapsed ? (
           <Link
-            href="/settings"
-            title="Plano Trial — clique para upgrade"
+            href="/settings/billing"
+            title={`${planLabel}${canUpgrade ? ' — clique para upgrade' : ''}`}
             className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-2)]"
           >
             <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-pulse-dot rounded-full bg-[var(--primary)] opacity-75" />
+              {canUpgrade && (
+                <span className="absolute inline-flex h-full w-full animate-pulse-dot rounded-full bg-[var(--primary)] opacity-75" />
+              )}
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
             </span>
           </Link>
         ) : (
           <div className="flex items-center gap-2 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 border border-[var(--border)]">
             <span className="relative flex h-1.5 w-1.5 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-pulse-dot rounded-full bg-[var(--primary)] opacity-75" />
+              {canUpgrade && (
+                <span className="absolute inline-flex h-full w-full animate-pulse-dot rounded-full bg-[var(--primary)] opacity-75" />
+              )}
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
             </span>
             <span className="text-[11px] font-medium text-[var(--text-secondary)]">
-              Plano Trial
+              {planLabel}
             </span>
-            <Link
-              href="/settings"
-              className="ml-auto text-[10px] font-semibold text-[var(--primary)] hover:underline"
-            >
-              Upgrade
-            </Link>
+            {canUpgrade && (
+              <Link
+                href="/settings/billing"
+                className="ml-auto text-[10px] font-semibold text-[var(--primary)] hover:underline"
+              >
+                Upgrade
+              </Link>
+            )}
           </div>
         )}
 
