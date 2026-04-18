@@ -91,10 +91,9 @@ export function FeatureFlagsHelp() {
                 com features que geram custo (LLM, WhatsApp, etc).
               </li>
               <li>
-                <strong>Override por org</strong> não é editável por aqui ainda — é feito via SQL
-                direto (coluna <code className="font-mono text-[11px]">enabled_for_orgs</code> da
-                tabela <code className="font-mono text-[11px]">feature_flags</code>). Abra uma
-                issue se precisar de UI pra isso.
+                <strong>Orgs específicas</strong> (override por org) — clique em
+                "+ Adicionar org" pra buscar por nome ou slug. Útil pra liberar uma feature
+                pra 1 cliente beta antes de abrir pro plano inteiro.
               </li>
             </ul>
           </div>
