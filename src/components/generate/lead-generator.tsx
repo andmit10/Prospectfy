@@ -681,21 +681,6 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
         {tab === 'historico' && (
           <div className="space-y-4">
             <div>
-              <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>FONTES CONSULTADAS</p>
-              <div className="flex flex-wrap gap-2">
-                {(lead.fontes_consultadas ?? FONTES.map(f => f.id)).map((fId) => {
-                  const f = FONTES.find(x => x.id === fId)
-                  if (!f) return null
-                  return (
-                    <span key={f.id} className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium" style={{ backgroundColor: `${f.color}18`, color: f.color, border: `1px solid ${f.color}40` }}>
-                      <CheckCircle2 className="h-3 w-3" />
-                      {f.label}
-                    </span>
-                  )
-                })}
-              </div>
-            </div>
-            <div style={{ borderTop: '1px solid var(--surface-3)' }} className="pt-4">
               <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>BREAKDOWN DO SCORE</p>
               <div className="grid grid-cols-5 gap-3">
                 {[
@@ -769,44 +754,152 @@ function ScoreWithTooltip({ score, details }: { score: number; details?: ScoreDe
   )
 }
 
+/**
+ * Modern pipeline visual — replaces the cramped 5-icon row with:
+ *  - Bigger 14-px circular nodes with breathing animation on the active step
+ *  - Connecting bars rendered with a moving gradient (CSS keyframes below)
+ *  - Sub-message of the active step rendered as a subtle "now doing" pill
+ *  - Top-level shimmer-progress bar with milestone numbering
+ *
+ * Animations are pure CSS so we don't pull framer-motion just for this.
+ */
 function PipelineVisual({ steps, progress }: { steps: PipelineStep[]; progress: number }) {
+  const activeStep = steps.find((s) => s.status === 'running')
+  const completedCount = steps.filter((s) => s.status === 'done').length
+
   return (
-    <div className="rounded-xl p-5" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-      {/* Pipeline steps */}
-      <div className="flex items-center justify-between mb-4">
+    <div
+      className="relative overflow-hidden rounded-2xl p-6"
+      style={{
+        background:
+          'linear-gradient(135deg, var(--surface-2) 0%, color-mix(in oklab, var(--primary) 4%, var(--surface-2)) 100%)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      {/* Embedded keyframes — local to this component */}
+      <style>{`
+        @keyframes orbya-breath {
+          0%,100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 35%, transparent); }
+          50%     { transform: scale(1.06); box-shadow: 0 0 0 10px color-mix(in oklab, var(--primary) 0%, transparent); }
+        }
+        @keyframes orbya-flow {
+          0%   { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
+        }
+        @keyframes orbya-shimmer {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+        .orbya-breath { animation: orbya-breath 1.6s ease-in-out infinite; }
+        .orbya-flow {
+          background: linear-gradient(90deg,
+            color-mix(in oklab, var(--primary) 30%, transparent) 0%,
+            var(--primary) 50%,
+            color-mix(in oklab, var(--primary) 30%, transparent) 100%);
+          background-size: 200% 100%;
+          animation: orbya-flow 1.8s linear infinite;
+        }
+      `}</style>
+
+      {/* Header — counter + activity */}
+      <div className="mb-5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4" style={{ color: 'var(--primary)' }} />
+          <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+            {completedCount === steps.length ? 'Pronto' : 'Processando'}
+          </span>
+          <span className="font-mono text-xs" style={{ color: 'var(--text-tertiary)' }}>
+            {completedCount}/{steps.length}
+          </span>
+        </div>
+        {activeStep?.message && (
+          <span
+            className="rounded-full px-3 py-1 text-xs font-medium"
+            style={{
+              backgroundColor: 'color-mix(in oklab, var(--primary) 10%, transparent)',
+              color: 'var(--primary)',
+              maxWidth: 360,
+            }}
+            title={activeStep.message}
+          >
+            {activeStep.message.length > 50
+              ? activeStep.message.slice(0, 50) + '…'
+              : activeStep.message}
+          </span>
+        )}
+      </div>
+
+      {/* Stepper */}
+      <div className="mb-5 flex items-start justify-between">
         {steps.map((step, i) => {
           const Icon = step.icon
+          const isDone = step.status === 'done'
+          const isRunning = step.status === 'running'
           return (
-            <div key={step.id} className="flex items-center" style={{ flex: i < steps.length - 1 ? 1 : undefined }}>
-              <div className="flex flex-col items-center gap-1.5">
+            <div
+              key={step.id}
+              className="flex items-center"
+              style={{ flex: i < steps.length - 1 ? 1 : undefined }}
+            >
+              <div className="flex flex-col items-center gap-2" style={{ minWidth: 56 }}>
                 <div
-                  className="flex h-10 w-10 items-center justify-center rounded-full transition-all duration-500"
+                  className={`flex h-14 w-14 items-center justify-center rounded-full transition-all duration-500 ${
+                    isRunning ? 'orbya-breath' : ''
+                  }`}
                   style={{
-                    backgroundColor: step.status === 'done' ? 'var(--primary)' : step.status === 'running' ? 'color-mix(in oklab, var(--primary) 12%, transparent)' : 'var(--surface-3)',
-                    border: `2px solid ${step.status === 'done' ? 'var(--primary)' : step.status === 'running' ? 'var(--primary)' : 'var(--border-strong)'}`,
+                    backgroundColor: isDone
+                      ? 'var(--primary)'
+                      : isRunning
+                        ? 'color-mix(in oklab, var(--primary) 16%, var(--surface-1))'
+                        : 'var(--surface-1)',
+                    border: `2px solid ${
+                      isDone
+                        ? 'var(--primary)'
+                        : isRunning
+                          ? 'var(--primary)'
+                          : 'var(--border-strong)'
+                    }`,
                   }}
                 >
-                  {step.status === 'done' ? (
-                    <CheckCircle2 className="h-5 w-5" style={{ color: 'var(--background)' }} />
-                  ) : step.status === 'running' ? (
-                    <Loader2 className="h-5 w-5 animate-spin" style={{ color: 'var(--primary)' }} />
+                  {isDone ? (
+                    <CheckCircle2
+                      className="h-6 w-6"
+                      style={{ color: 'var(--primary-foreground, #fff)' }}
+                    />
+                  ) : isRunning ? (
+                    <Loader2
+                      className="h-6 w-6 animate-spin"
+                      style={{ color: 'var(--primary)' }}
+                    />
                   ) : (
-                    <Icon className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
+                    <Icon className="h-5 w-5" style={{ color: 'var(--text-tertiary)' }} />
                   )}
                 </div>
-                <span className="text-xs font-medium" style={{ color: step.status !== 'pending' ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                <span
+                  className="text-xs font-semibold"
+                  style={{
+                    color:
+                      step.status !== 'pending'
+                        ? 'var(--text-primary)'
+                        : 'var(--text-tertiary)',
+                    letterSpacing: '0.02em',
+                  }}
+                >
                   {step.label}
                 </span>
               </div>
               {i < steps.length - 1 && (
-                <div className="flex-1 h-0.5 mx-2 mt-[-18px] rounded-full" style={{ backgroundColor: 'var(--border)' }}>
-                  <div
-                    className="h-full rounded-full transition-all duration-700"
-                    style={{
-                      backgroundColor: 'var(--primary)',
-                      width: step.status === 'done' ? '100%' : step.status === 'running' ? '50%' : '0%',
-                    }}
-                  />
+                <div
+                  className="relative mx-3 mt-7 h-1 flex-1 overflow-hidden rounded-full"
+                  style={{ backgroundColor: 'var(--border)' }}
+                >
+                  {isDone && (
+                    <div
+                      className="absolute inset-0 rounded-full"
+                      style={{ backgroundColor: 'var(--primary)' }}
+                    />
+                  )}
+                  {isRunning && <div className="orbya-flow absolute inset-0 rounded-full" />}
                 </div>
               )}
             </div>
@@ -814,15 +907,102 @@ function PipelineVisual({ steps, progress }: { steps: PipelineStep[]; progress: 
         })}
       </div>
 
-      {/* Progress bar */}
-      <div className="h-1.5 rounded-full mb-1" style={{ backgroundColor: 'var(--border)' }}>
+      {/* Bottom progress bar with shimmer */}
+      <div
+        className="relative h-2 overflow-hidden rounded-full"
+        style={{ backgroundColor: 'var(--border)' }}
+      >
         <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ backgroundColor: 'var(--primary)', width: `${progress}%` }}
+          className="absolute inset-y-0 left-0 rounded-full transition-all duration-700"
+          style={{
+            width: `${progress}%`,
+            background:
+              'linear-gradient(90deg, color-mix(in oklab, var(--primary) 70%, transparent) 0%, var(--primary) 100%)',
+          }}
         />
+        {progress > 0 && progress < 100 && (
+          <div
+            className="absolute inset-y-0 w-1/3 rounded-full"
+            style={{
+              background:
+                'linear-gradient(90deg, transparent 0%, color-mix(in oklab, #fff 35%, transparent) 50%, transparent 100%)',
+              animation: 'orbya-shimmer 1.6s ease-in-out infinite',
+            }}
+          />
+        )}
       </div>
-      <div className="flex justify-end">
-        <span className="text-xs font-mono" style={{ color: 'var(--primary)' }}>{progress}%</span>
+      <div className="mt-1.5 flex justify-end">
+        <span className="font-mono text-xs font-semibold" style={{ color: 'var(--primary)' }}>
+          {Math.round(progress)}%
+        </span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Skeleton cards rendered below the pipeline while leads are being generated.
+ * Gives the user something to look at instead of an empty white space, and
+ * builds anticipation. Count matches the requested quantity (capped at 12 to
+ * stay above the fold).
+ */
+function SkeletonCards({ count }: { count: number }) {
+  const visible = Math.min(count, 12)
+  return (
+    <div className="space-y-2">
+      <p
+        className="text-xs font-semibold uppercase"
+        style={{ color: 'var(--text-tertiary)', letterSpacing: '0.06em' }}
+      >
+        Preparando {count} {count === 1 ? 'lead' : 'leads'}…
+      </p>
+      <div className="space-y-1.5">
+        {Array.from({ length: visible }).map((_, i) => (
+          <div
+            key={i}
+            className="relative h-14 overflow-hidden rounded-lg"
+            style={{
+              backgroundColor: 'var(--surface-2)',
+              border: '1px solid var(--border)',
+              animationDelay: `${i * 80}ms`,
+            }}
+          >
+            <div
+              className="absolute inset-y-0 w-1/3"
+              style={{
+                background:
+                  'linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--primary) 8%, transparent) 50%, transparent 100%)',
+                animation: 'orbya-shimmer 1.4s ease-in-out infinite',
+                animationDelay: `${i * 80}ms`,
+              }}
+            />
+            <div className="flex h-full items-center gap-3 px-4">
+              <div
+                className="h-8 w-8 rounded-full"
+                style={{ backgroundColor: 'var(--surface-3)' }}
+              />
+              <div className="flex-1 space-y-1.5">
+                <div
+                  className="h-2.5 rounded"
+                  style={{ width: '40%', backgroundColor: 'var(--surface-3)' }}
+                />
+                <div
+                  className="h-2 rounded"
+                  style={{ width: '24%', backgroundColor: 'var(--surface-3)' }}
+                />
+              </div>
+              <div
+                className="h-6 w-12 rounded-full"
+                style={{ backgroundColor: 'var(--surface-3)' }}
+              />
+            </div>
+          </div>
+        ))}
+        {count > visible && (
+          <p className="pt-1 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
+            + {count - visible} {count - visible === 1 ? 'lead' : 'leads'} a caminho…
+          </p>
+        )}
       </div>
     </div>
   )
@@ -884,6 +1064,7 @@ export function LeadGenerator() {
   >(null)
   const [pipeline, setPipeline] = useState<PipelineStep[]>(INITIAL_PIPELINE)
   const [progress, setProgress] = useState(0)
+  const [requestedQty, setRequestedQty] = useState(0)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [stats, setStats] = useState<Record<string, number>>({})
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -926,6 +1107,7 @@ export function LeadGenerator() {
     setProgress(0)
     setLogs([])
     setStats({})
+    setRequestedQty(values.quantidade ?? 0)
 
     try {
       const res = await fetch('/api/generate-leads', {
@@ -1068,37 +1250,6 @@ export function LeadGenerator() {
 
   return (
     <div className="space-y-4">
-
-      {/* ── Fontes Ativas ── */}
-      <div>
-        <p className="text-xs font-semibold mb-2" style={{ color: 'var(--text-tertiary)' }}>FONTES ATIVAS</p>
-        <div className="flex flex-wrap gap-2">
-          {FONTES.map(f => {
-            const isGoogle = f.id === 'google_maps'
-            return (
-              <span
-                key={f.id}
-                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium"
-                style={{
-                  backgroundColor: isGoogle ? '#FFFFFF' : `${f.color}18`,
-                  color: f.color,
-                  border: `1px solid ${isGoogle ? '#DADCE0' : `${f.color}40`}`,
-                }}
-                title={isGoogle ? 'Google' : f.label}
-              >
-                {isGoogle ? (
-                  <GoogleLogo />
-                ) : (
-                  <>
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: f.color }} />
-                    {f.label}
-                  </>
-                )}
-              </span>
-            )
-          })}
-        </div>
-      </div>
 
       {/* ── Form + Filtros ── */}
       <div className="rounded-xl p-5" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
@@ -1569,6 +1720,7 @@ export function LeadGenerator() {
             )}
           </div>
           <PipelineVisual steps={pipeline} progress={progress} />
+          {isGenerating && requestedQty > 0 && <SkeletonCards count={requestedQty} />}
           <ActivityLog entries={logs} />
         </div>
       )}
@@ -1750,14 +1902,13 @@ export function LeadGenerator() {
                     <th className="py-2.5 px-3 text-left font-semibold tracking-wide" style={{ color: 'var(--text-tertiary)' }}>DECISOR</th>
                     <th className="py-2.5 px-3 text-center font-semibold tracking-wide" style={{ color: 'var(--text-tertiary)' }}>LINKEDIN</th>
                     <th className="py-2.5 px-3 text-center font-semibold tracking-wide" style={{ color: 'var(--text-tertiary)' }}>EMAIL</th>
-                    <th className="py-2.5 px-3 text-left font-semibold tracking-wide" style={{ color: 'var(--text-tertiary)' }}>FONTES</th>
                     <th className="py-2.5 px-3 text-center font-semibold tracking-wide" style={{ color: 'var(--text-tertiary)' }}>STATUS</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={13} className="py-12 text-center">
+                      <td colSpan={12} className="py-12 text-center">
                         <div className="flex flex-col items-center gap-2">
                           <Search className="h-6 w-6" style={{ color: 'var(--text-disabled)' }} />
                           <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Nenhum lead corresponde aos filtros</p>
@@ -1771,7 +1922,6 @@ export function LeadGenerator() {
                     const isSelected = selected.has(origIdx)
                     const isExpanded = expanded === origIdx
                     const statusMeta = STATUS_FILTERS.find(s => s.id === status) ?? STATUS_FILTERS[4]
-                    const fontesAtivas = lead.fontes_consultadas ?? ['google_maps', 'quadro_societario', lead.linkedin_url && 'linkedin', lead.email && 'hunter', 'claude_ai'].filter(Boolean) as string[]
 
                     return (
                       <React.Fragment key={origIdx}>
@@ -1867,12 +2017,6 @@ export function LeadGenerator() {
                               </span>
                             ) : <span style={{ color: 'var(--text-disabled)' }}>—</span>}
                           </td>
-                          {/* Fontes */}
-                          <td className="py-2.5 px-3">
-                            <div className="flex items-center gap-1">
-                              {fontesAtivas.map((fId) => <SourceBadge key={fId} id={fId} />)}
-                            </div>
-                          </td>
                           {/* Status pill */}
                           <td className="py-2.5 px-3 text-center">
                             <span
@@ -1885,7 +2029,7 @@ export function LeadGenerator() {
                         </tr>
                         {isExpanded && (
                           <tr>
-                            <td colSpan={13} className="p-0">
+                            <td colSpan={12} className="p-0">
                               <LeadDetailPanel lead={lead} />
                             </td>
                           </tr>
