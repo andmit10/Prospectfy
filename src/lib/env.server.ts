@@ -26,6 +26,12 @@ const serverSchema = z.object({
     .union([z.literal('true'), z.literal('false')])
     .optional()
     .transform((v) => v === 'true'),
+  // Unipile Managed — when set, the UI shows the "Prospectfy gerencia" option
+  // in the LinkedIn connection dialog and uses these as the operator-level
+  // credentials (versus the BYOU model where the customer supplies their own
+  // DSN + apiKey). Missing both envs = BYOU-only mode.
+  UNIPILE_MANAGED_DSN: z.string().min(1).optional(),
+  UNIPILE_MANAGED_API_KEY: z.string().min(1).optional(),
   // Public app URL — used to build the webhook URL we register with Evolution Go.
   NEXT_PUBLIC_APP_URL: z.string().url().default('http://localhost:3000'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -51,6 +57,8 @@ export const serverEnv = serverSchema.parse({
   EVOLUTION_GO_SHARED_BASE_URL: e('EVOLUTION_GO_SHARED_BASE_URL'),
   EVOLUTION_GO_SHARED_GLOBAL_API_KEY: e('EVOLUTION_GO_SHARED_GLOBAL_API_KEY'),
   EVOLUTION_GO_SHARED_IGNORE_TLS: e('EVOLUTION_GO_SHARED_IGNORE_TLS'),
+  UNIPILE_MANAGED_DSN: e('UNIPILE_MANAGED_DSN'),
+  UNIPILE_MANAGED_API_KEY: e('UNIPILE_MANAGED_API_KEY'),
   NEXT_PUBLIC_APP_URL: e('NEXT_PUBLIC_APP_URL'),
   NODE_ENV: process.env.NODE_ENV,
 })

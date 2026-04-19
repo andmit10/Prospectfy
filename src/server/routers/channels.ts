@@ -15,6 +15,10 @@ import {
   connectInstance as evoConnectInstance,
   disconnectInstance as evoDisconnectInstance,
 } from '@/lib/channels/providers/whatsapp/evolution-go-admin'
+import {
+  createHostedAuthLink as unipileCreateHostedAuthLink,
+  isManagedAvailable as unipileManagedAvailable,
+} from '@/lib/channels/providers/linkedin/unipile-admin'
 import { serverEnv } from '@/lib/env.server'
 import { createServiceClient } from '@/lib/supabase/service'
 
@@ -461,6 +465,192 @@ export const channelsRouter = router({
         })
         .eq('id', input.integrationId)
       return { success: true }
+    }),
+
+  /**
+   * Returns whether the Managed Unipile option is available in this
+   * environment. When false, the UI hides the "Prospectfy gerencia"
+   * card and only offers BYOU.
+   */
+  linkedinManagedAvailable: orgProcedure.query(() => {
+    return { available: unipileManagedAvailable() }
+  }),
+
+  /**
+   * Provision a Managed Unipile LinkedIn integration.
+   *
+   * Flow:
+   *   1. Plan limit check (max_channels). Disconnected slots don't count.
+   *   2. Insert channel_integrations row (provider='unipile', status='disconnected',
+   *      metadata.managed=true) — config carries operator DSN+apiKey; accountId
+   *      comes later from the webhook.
+   *   3. Create a plan_addons row (addon_key='linkedin_unipile', quantity=1)
+   *      so the Stripe webhook sync can pick it up on the next renewal.
+   *   4. Call Unipile hosted auth → returns URL for the customer's new tab.
+   *
+   * Returns { integrationId, authUrl }.
+   */
+  provisionLinkedinManaged: adminProcedure.mutation(async ({ ctx }) => {
+    if (!unipileManagedAvailable()) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'Unipile Managed não está configurado neste ambiente. Use o modo BYOU (Bring Your Own Unipile).',
+      })
+    }
+
+    // 1. Plan limit
+    const { data: org } = await ctx.supabase
+      .from('organizations')
+      .select('plan')
+      .eq('id', ctx.orgId)
+      .single()
+
+    const [{ data: planRow }, { count: existingCount }] = await Promise.all([
+      ctx.supabase
+        .from('plan_catalog')
+        .select('max_channels')
+        .eq('plan', (org?.plan as string) ?? 'trial')
+        .maybeSingle(),
+      ctx.supabase
+        .from('channel_integrations')
+        .select('id', { head: true, count: 'exact' })
+        .eq('organization_id', ctx.orgId)
+        .eq('channel', 'linkedin')
+        .neq('status', 'disconnected'),
+    ])
+
+    const max = (planRow?.max_channels as number | null) ?? 1
+    if ((existingCount ?? 0) >= max) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `Limite do plano atingido: ${max} canal${max === 1 ? '' : 'es'} LinkedIn. Faça upgrade para conectar mais contas.`,
+      })
+    }
+
+    // 2. Create integration row — config has operator credentials; accountId
+    //    is populated by the webhook when the customer finishes logging in.
+    const integrationConfig = {
+      dsn: serverEnv.UNIPILE_MANAGED_DSN!,
+      apiKey: serverEnv.UNIPILE_MANAGED_API_KEY!,
+      accountId: '', // filled by webhook
+    }
+    const encrypted = encryptConfig(integrationConfig)
+
+    const { data: newRow, error: insertErr } = await ctx.supabase
+      .from('channel_integrations')
+      .insert({
+        organization_id: ctx.orgId,
+        channel: 'linkedin',
+        provider: 'unipile',
+        display_name: 'LinkedIn (Managed)',
+        config: encrypted,
+        status: 'disconnected',
+        is_default: (existingCount ?? 0) === 0,
+        metadata: {
+          managed: true,
+          auth_pending: true,
+          provisioned_at: new Date().toISOString(),
+        },
+        created_by: ctx.user.id,
+      })
+      .select('id')
+      .single()
+
+    if (insertErr || !newRow) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: insertErr?.message ?? 'Falha ao gravar integração',
+      })
+    }
+
+    // 3. Addon row (so Stripe sync picks it up on next billing cycle).
+    //    Upsert in case there's already a row for this addon_key + org.
+    {
+      const supabase = createServiceClient()
+      const { data: existing } = await supabase
+        .from('plan_addons')
+        .select('id, quantity, active')
+        .eq('organization_id', ctx.orgId)
+        .eq('addon_key', 'linkedin_unipile')
+        .maybeSingle()
+      if (existing) {
+        await supabase
+          .from('plan_addons')
+          .update({
+            quantity: (existing.quantity as number) + 1,
+            active: true,
+            active_to: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id)
+      } else {
+        await supabase.from('plan_addons').insert({
+          organization_id: ctx.orgId,
+          addon_key: 'linkedin_unipile',
+          display_name: 'LinkedIn (Unipile)',
+          monthly_price_brl: 299,
+          quantity: 1,
+          active: true,
+          active_from: new Date().toISOString(),
+          metadata: { source: 'managed_provision', integration_id: newRow.id },
+        })
+      }
+    }
+
+    // 4. Hosted auth link
+    try {
+      const link = await unipileCreateHostedAuthLink({ integrationId: newRow.id as string })
+      return { integrationId: newRow.id as string, authUrl: link.url }
+    } catch (err) {
+      // Roll back the row + addon decrement on failure.
+      await ctx.supabase.from('channel_integrations').delete().eq('id', newRow.id)
+      // Soft-decrement addon — we don't know if it's 0 before or after.
+      const supabase = createServiceClient()
+      const { data: addonRow } = await supabase
+        .from('plan_addons')
+        .select('id, quantity')
+        .eq('organization_id', ctx.orgId)
+        .eq('addon_key', 'linkedin_unipile')
+        .maybeSingle()
+      if (addonRow) {
+        const next = Math.max(0, (addonRow.quantity as number) - 1)
+        await supabase
+          .from('plan_addons')
+          .update({
+            quantity: next,
+            active: next > 0,
+            active_to: next > 0 ? null : new Date().toISOString(),
+          })
+          .eq('id', addonRow.id)
+      }
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }),
+
+  /** Poll for LinkedIn connection status while the customer completes hosted auth. */
+  getLinkedinConnectionStatus: orgProcedure
+    .input(z.object({ integrationId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const { data, error } = await ctx.supabase
+        .from('channel_integrations')
+        .select('status, connected_at, metadata')
+        .eq('id', input.integrationId)
+        .eq('organization_id', ctx.orgId)
+        .single()
+      if (error || !data) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Integração não encontrada' })
+      }
+      return {
+        status: data.status as 'active' | 'error' | 'disconnected',
+        connectedAt: data.connected_at as string | null,
+        authPending: Boolean(
+          ((data.metadata as Record<string, unknown> | null) ?? {}).auth_pending
+        ),
+      }
     }),
 
   /** List recent channel_messages for the active org. */

@@ -31,6 +31,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { EvolutionGoQrDialog } from './evolution-go-qr-dialog'
+import { UnipileChoiceDialog } from './unipile-choice-dialog'
 
 type Channel = 'whatsapp' | 'email' | 'linkedin' | 'instagram'
 
@@ -109,13 +110,20 @@ export function IntegrationsManager() {
   const [connectTarget, setConnectTarget] = useState<CatalogEntry | null>(null)
   const [testTarget, setTestTarget] = useState<Integration | null>(null)
   const [evoGoQrOpen, setEvoGoQrOpen] = useState(false)
+  const [unipileChoiceOpen, setUnipileChoiceOpen] = useState(false)
+  const [unipileEntry, setUnipileEntry] = useState<CatalogEntry | null>(null)
 
-  // Branch the connect flow: evolution_go gets the auto-provision QR dialog
-  // (cliente nomeia → cria instância no shared VPS → escaneia QR), everyone
-  // else still uses the manual config form.
+  // Branch the connect flow:
+  //   - evolution_go → auto-provision QR dialog
+  //   - unipile → choice dialog (BYOU vs Managed). BYOU falls through to the
+  //     standard ConnectDialog with the original entry.
+  //   - else → standard ConnectDialog (manual form)
   function openConnect(entry: CatalogEntry) {
     if (entry.id === 'evolution_go') {
       setEvoGoQrOpen(true)
+    } else if (entry.id === 'unipile') {
+      setUnipileEntry(entry)
+      setUnipileChoiceOpen(true)
     } else {
       setConnectTarget(entry)
     }
@@ -193,6 +201,15 @@ export function IntegrationsManager() {
       />
       <TestDialog integration={testTarget} onClose={() => setTestTarget(null)} />
       <EvolutionGoQrDialog open={evoGoQrOpen} onClose={() => setEvoGoQrOpen(false)} />
+      <UnipileChoiceDialog
+        open={unipileChoiceOpen}
+        onClose={() => setUnipileChoiceOpen(false)}
+        onChooseByou={() => {
+          // Hand off to the standard ConnectDialog with the unipile entry so
+          // the customer pastes their own DSN + apiKey + accountId.
+          if (unipileEntry) setConnectTarget(unipileEntry)
+        }}
+      />
     </div>
   )
 }
