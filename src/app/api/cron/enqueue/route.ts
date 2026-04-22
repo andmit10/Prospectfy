@@ -4,20 +4,47 @@ import { fetchPendingJobs } from '@/server/services/agent-queue'
 import { Queue } from 'bullmq'
 import type { AgentJobData } from '@workers/worker'
 
-// Vercel Cron: add to vercel.json → { "crons": [{ "path": "/api/cron/enqueue", "schedule": "0 * * * *" }] }
-// Secured by CRON_SECRET env var
+/**
+ * Hourly cron — enqueues pending agent jobs from `agent_queue` into BullMQ
+ * so the Railway worker can pick them up.
+ *
+ * Dual-driver: called by both Vercel Cron (GET + Authorization: Bearer)
+ * AND GitHub Actions (POST + x-cron-secret). Either works; both are
+ * validated against the same CRON_SECRET env var.
+ *
+ * Redis handling: when REDIS_URL isn't configured (MVP runs without a
+ * worker — that's by design per docs/tasks/todo.md), we short-circuit
+ * with a 200 + `skipped: true` so the scheduler stays green. As soon as
+ * REDIS_URL lands, enqueue starts happening without a code change.
+ */
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const cronSecret = process.env.CRON_SECRET
+  return handle(request)
+}
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+export async function POST(request: Request) {
+  return handle(request)
+}
+
+async function handle(request: Request): Promise<Response> {
+  // Accept either auth header style the two cron drivers use.
+  const cronSecret = process.env.CRON_SECRET
+  const bearer = request.headers.get('authorization')
+  const custom = request.headers.get('x-cron-secret')
+  const match =
+    (bearer && bearer === `Bearer ${cronSecret}`) ||
+    (custom && custom === cronSecret)
+  if (cronSecret && !match) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // No Redis = no worker = nothing to enqueue. Don't treat that as failure.
   const redisUrl = process.env.REDIS_URL
   if (!redisUrl) {
-    return NextResponse.json({ error: 'REDIS_URL not configured' }, { status: 500 })
+    return NextResponse.json({
+      skipped: true,
+      reason: 'REDIS_URL not configured — worker disabled',
+    })
   }
 
   const connection = new (await import('ioredis')).default(redisUrl)
