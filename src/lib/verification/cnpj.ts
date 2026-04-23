@@ -76,55 +76,99 @@ export function formatCnpj(digits: string): string {
 }
 
 /**
- * Verify a CNPJ against Receita Federal (via BrasilAPI proxy).
+ * Verify a CNPJ against Receita Federal.
  *
- * This function is the ONLY authoritative path for "CNPJ ativo na Receita" —
- * no LLM output should be trusted for this flag. Timeout bound to 7s to keep
- * the generate-leads SSE stream responsive.
+ * Strategy:
+ *   1. Try BrasilAPI (fast, Vercel-edge cached) with 8s timeout
+ *   2. If BrasilAPI 4xx/5xx/timeout (not 404), fall back to ReceitaWS
+ *   3. ReceitaWS free tier is 3 req/min/IP — use only as backup
+ *
+ * BrasilAPI is known to occasionally rate-limit shared IPs (Vercel iad1).
+ * The sequential fallback keeps the feature reliable for end users without
+ * needing a paid API key.
  */
 export async function verifyCnpj(
   input: string,
   options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<CnpjVerificationResult> {
-  const { timeoutMs = 7000, signal } = options
+  const { timeoutMs = 8000, signal } = options
 
   const normalized = normalizeCnpj(input)
   if (!normalized) {
     return { verified: false, reason: 'invalid_format', cnpj_input: input }
   }
 
+  // ── Attempt 1: BrasilAPI ────────────────────────────────────────────────
+  const brasilApiResult = await tryBrasilApi(normalized, { timeoutMs, signal })
+  if (brasilApiResult.kind === 'ok') return brasilApiResult.data
+  if (brasilApiResult.kind === 'not_found') {
+    return { verified: false, reason: 'not_found', cnpj_input: input }
+  }
+  // Anything else (rate_limited, network_error, 5xx) → fall through to ReceitaWS
+
+  log.warn('cnpj brasilapi failed, trying receitaws', {
+    cnpj: normalized,
+    reason: brasilApiResult.reason,
+  })
+
+  // ── Attempt 2: ReceitaWS ────────────────────────────────────────────────
+  const receitaWsResult = await tryReceitaWs(normalized, { timeoutMs, signal })
+  if (receitaWsResult.kind === 'ok') return receitaWsResult.data
+  if (receitaWsResult.kind === 'not_found') {
+    return { verified: false, reason: 'not_found', cnpj_input: input }
+  }
+
+  log.warn('cnpj both apis failed', {
+    cnpj: normalized,
+    brasilapi: brasilApiResult.reason,
+    receitaws: receitaWsResult.reason,
+  })
+
+  // Both failed — prefer BrasilAPI's error semantics (it's our primary).
+  return {
+    verified: false,
+    reason: brasilApiResult.reason === 'rate_limited' ? 'rate_limited' : 'network_error',
+    cnpj_input: input,
+    message: `BrasilAPI ${brasilApiResult.detail ?? '?'} + ReceitaWS ${receitaWsResult.detail ?? '?'}`,
+  }
+}
+
+// ─── BrasilAPI engine ──────────────────────────────────────────────────────
+type EngineResult =
+  | { kind: 'ok'; data: CnpjVerified }
+  | { kind: 'not_found' }
+  | { kind: 'rate_limited'; detail: string; reason: 'rate_limited' }
+  | { kind: 'error'; detail: string; reason: 'network_error' | 'rate_limited' }
+
+async function tryBrasilApi(
+  normalized: string,
+  opts: { timeoutMs: number; signal?: AbortSignal },
+): Promise<EngineResult> {
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort('timeout'), timeoutMs)
-  // If the caller passed an AbortSignal, link it so cancelling the SSE stream
-  // also cancels the fetch.
-  if (signal) {
-    if (signal.aborted) ctrl.abort('already_aborted')
-    else signal.addEventListener('abort', () => ctrl.abort('caller_aborted'), { once: true })
+  const timer = setTimeout(() => ctrl.abort('timeout'), opts.timeoutMs)
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort('already_aborted')
+    else opts.signal.addEventListener('abort', () => ctrl.abort('caller_aborted'), { once: true })
   }
 
   try {
     const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${normalized}`, {
       signal: ctrl.signal,
-      // BrasilAPI has a Vercel-edge cache with ~1h TTL — fine for us.
-      headers: { accept: 'application/json' },
+      headers: {
+        accept: 'application/json',
+        // Ativafy user-agent helps with rate-limit allowlisting if we ever contact them.
+        'user-agent': 'Ativafy/1.0 (+https://ativafy.com.br)',
+      },
     })
 
-    if (res.status === 404) {
-      return { verified: false, reason: 'not_found', cnpj_input: input }
-    }
-    if (res.status === 429) {
-      const retryAfter = Number(res.headers.get('retry-after')) || undefined
-      return { verified: false, reason: 'rate_limited', cnpj_input: input, retry_after_sec: retryAfter }
-    }
+    if (res.status === 404) return { kind: 'not_found' }
+    if (res.status === 429) return { kind: 'rate_limited', detail: '429', reason: 'rate_limited' }
     if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      log.warn('brasilapi unexpected status', { cnpj: normalized, status: res.status, body: body.slice(0, 200) })
-      return { verified: false, reason: 'network_error', cnpj_input: input, message: `BrasilAPI ${res.status}` }
+      return { kind: 'error', detail: String(res.status), reason: 'network_error' }
     }
 
     const data = (await res.json()) as BrasilApiCnpjResponse
     const situacao = (data.descricao_situacao_cadastral ?? '').toUpperCase()
-
     const socios: Array<{ nome: string; qualificacao: string | null }> = Array.isArray(data.qsa)
       ? data.qsa.slice(0, 6).map((s) => ({
           nome: String(s.nome_socio ?? '').trim(),
@@ -133,39 +177,160 @@ export async function verifyCnpj(
       : []
 
     return {
-      verified: true,
-      source: 'brasilapi_receita',
-      cnpj: normalized,
-      cnpj_formatted: formatCnpj(normalized),
-      razao_social: String(data.razao_social ?? '').trim(),
-      nome_fantasia: data.nome_fantasia ? String(data.nome_fantasia).trim() : null,
-      situacao_cadastral: situacao,
-      cnpj_ativo: situacao === 'ATIVA',
-      logradouro: data.logradouro ? String(data.logradouro) : null,
-      numero: data.numero ? String(data.numero) : null,
-      complemento: data.complemento ? String(data.complemento) : null,
-      bairro: data.bairro ? String(data.bairro) : null,
-      cidade: data.municipio ? String(data.municipio) : null,
-      estado: data.uf ? String(data.uf) : null,
-      cep: data.cep ? String(data.cep) : null,
-      email: data.email ? String(data.email).toLowerCase() : null,
-      telefone: composeTelefone(data.ddd_telefone_1, data.ddd_telefone_2),
-      cnae_fiscal_codigo: data.cnae_fiscal ? String(data.cnae_fiscal) : null,
-      cnae_fiscal_descricao: data.cnae_fiscal_descricao ? String(data.cnae_fiscal_descricao) : null,
-      porte: data.porte ? String(data.porte) : null,
-      capital_social: typeof data.capital_social === 'number' ? data.capital_social : null,
-      data_inicio_atividade: data.data_inicio_atividade ? String(data.data_inicio_atividade) : null,
-      natureza_juridica: data.natureza_juridica ? String(data.natureza_juridica) : null,
-      socios,
-      fetched_at: new Date().toISOString(),
+      kind: 'ok',
+      data: {
+        verified: true,
+        source: 'brasilapi_receita',
+        cnpj: normalized,
+        cnpj_formatted: formatCnpj(normalized),
+        razao_social: String(data.razao_social ?? '').trim(),
+        nome_fantasia: data.nome_fantasia ? String(data.nome_fantasia).trim() : null,
+        situacao_cadastral: situacao,
+        cnpj_ativo: situacao === 'ATIVA',
+        logradouro: data.logradouro ? String(data.logradouro) : null,
+        numero: data.numero ? String(data.numero) : null,
+        complemento: data.complemento ? String(data.complemento) : null,
+        bairro: data.bairro ? String(data.bairro) : null,
+        cidade: data.municipio ? String(data.municipio) : null,
+        estado: data.uf ? String(data.uf) : null,
+        cep: data.cep ? String(data.cep) : null,
+        email: data.email ? String(data.email).toLowerCase() : null,
+        telefone: composeTelefone(data.ddd_telefone_1, data.ddd_telefone_2),
+        cnae_fiscal_codigo: data.cnae_fiscal ? String(data.cnae_fiscal) : null,
+        cnae_fiscal_descricao: data.cnae_fiscal_descricao ? String(data.cnae_fiscal_descricao) : null,
+        porte: data.porte ? String(data.porte) : null,
+        capital_social: typeof data.capital_social === 'number' ? data.capital_social : null,
+        data_inicio_atividade: data.data_inicio_atividade ? String(data.data_inicio_atividade) : null,
+        natureza_juridica: data.natureza_juridica ? String(data.natureza_juridica) : null,
+        socios,
+        fetched_at: new Date().toISOString(),
+      },
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    if (message.includes('abort') || message.includes('timeout')) {
-      return { verified: false, reason: 'network_error', cnpj_input: input, message: 'timeout' }
+    const isTimeout = message.includes('abort') || message.includes('timeout')
+    return { kind: 'error', detail: isTimeout ? 'timeout' : message.slice(0, 40), reason: 'network_error' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ─── ReceitaWS engine ──────────────────────────────────────────────────────
+type ReceitaWsResponse = {
+  status?: string
+  message?: string
+  cnpj?: string
+  nome?: string
+  fantasia?: string
+  situacao?: string
+  logradouro?: string
+  numero?: string
+  complemento?: string
+  bairro?: string
+  municipio?: string
+  uf?: string
+  cep?: string
+  email?: string
+  telefone?: string
+  atividade_principal?: Array<{ code?: string; text?: string }>
+  porte?: string
+  capital_social?: string | number
+  abertura?: string
+  natureza_juridica?: string
+  qsa?: Array<{ nome?: string; qual?: string }>
+}
+
+async function tryReceitaWs(
+  normalized: string,
+  opts: { timeoutMs: number; signal?: AbortSignal },
+): Promise<EngineResult> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort('timeout'), opts.timeoutMs)
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort('already_aborted')
+    else opts.signal.addEventListener('abort', () => ctrl.abort('caller_aborted'), { once: true })
+  }
+
+  try {
+    const res = await fetch(`https://receitaws.com.br/v1/cnpj/${normalized}`, {
+      signal: ctrl.signal,
+      headers: {
+        accept: 'application/json',
+        'user-agent': 'Ativafy/1.0 (+https://ativafy.com.br)',
+      },
+    })
+
+    if (res.status === 404) return { kind: 'not_found' }
+    if (res.status === 429) return { kind: 'rate_limited', detail: '429', reason: 'rate_limited' }
+    if (!res.ok) {
+      return { kind: 'error', detail: String(res.status), reason: 'network_error' }
     }
-    log.warn('brasilapi fetch failed', { err: message, cnpj: normalized })
-    return { verified: false, reason: 'network_error', cnpj_input: input, message }
+
+    const data = (await res.json()) as ReceitaWsResponse
+
+    // ReceitaWS uses a status field — "ERROR" means CNPJ didn't exist or limit hit.
+    if (data.status === 'ERROR') {
+      const msg = (data.message ?? '').toLowerCase()
+      if (msg.includes('não encontrado') || msg.includes('nao encontrado') || msg.includes('not found')) {
+        return { kind: 'not_found' }
+      }
+      if (msg.includes('limite') || msg.includes('excedido') || msg.includes('limit')) {
+        return { kind: 'rate_limited', detail: 'limit', reason: 'rate_limited' }
+      }
+      return { kind: 'error', detail: (data.message ?? 'ERROR').slice(0, 40), reason: 'network_error' }
+    }
+
+    const situacao = (data.situacao ?? '').toUpperCase()
+    const atividadePrincipal = Array.isArray(data.atividade_principal) && data.atividade_principal.length > 0
+      ? data.atividade_principal[0]
+      : null
+    const socios = Array.isArray(data.qsa)
+      ? data.qsa.slice(0, 6).map((s) => ({
+          nome: String(s.nome ?? '').trim(),
+          qualificacao: s.qual ? String(s.qual) : null,
+        }))
+      : []
+
+    const capitalSocial = typeof data.capital_social === 'number'
+      ? data.capital_social
+      : typeof data.capital_social === 'string'
+        ? Number(data.capital_social.replace(/[^\d.,]/g, '').replace(',', '.')) || null
+        : null
+
+    return {
+      kind: 'ok',
+      data: {
+        verified: true,
+        source: 'brasilapi_receita', // keep same source tag for UI consistency
+        cnpj: normalized,
+        cnpj_formatted: formatCnpj(normalized),
+        razao_social: String(data.nome ?? '').trim(),
+        nome_fantasia: data.fantasia ? String(data.fantasia).trim() : null,
+        situacao_cadastral: situacao,
+        cnpj_ativo: situacao === 'ATIVA',
+        logradouro: data.logradouro ? String(data.logradouro) : null,
+        numero: data.numero ? String(data.numero) : null,
+        complemento: data.complemento ? String(data.complemento) : null,
+        bairro: data.bairro ? String(data.bairro) : null,
+        cidade: data.municipio ? String(data.municipio) : null,
+        estado: data.uf ? String(data.uf) : null,
+        cep: data.cep ? String(data.cep) : null,
+        email: data.email ? String(data.email).toLowerCase() : null,
+        telefone: data.telefone ? String(data.telefone) : null,
+        cnae_fiscal_codigo: atividadePrincipal?.code ?? null,
+        cnae_fiscal_descricao: atividadePrincipal?.text ?? null,
+        porte: data.porte ? String(data.porte) : null,
+        capital_social: typeof capitalSocial === 'number' ? capitalSocial : null,
+        data_inicio_atividade: data.abertura ? String(data.abertura) : null,
+        natureza_juridica: data.natureza_juridica ? String(data.natureza_juridica) : null,
+        socios,
+        fetched_at: new Date().toISOString(),
+      },
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const isTimeout = message.includes('abort') || message.includes('timeout')
+    return { kind: 'error', detail: isTimeout ? 'timeout' : message.slice(0, 40), reason: 'network_error' }
   } finally {
     clearTimeout(timer)
   }
