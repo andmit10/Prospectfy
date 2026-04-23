@@ -831,68 +831,116 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
 
                     <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
                       <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                        VALIDAÇÃO POR FONTE
+                        FONTE DE CADA DADO
                       </p>
                       <div className="space-y-2.5">
-                        {[
-                          {
-                            filled: !!lead.cnpj && lead.cnpj.length > 0,
-                            verified: receitaVerified,
-                            label: receitaVerified
-                              ? `CNPJ ${lead.situacao_cadastral || 'verificado'}`
-                              : 'CNPJ informado',
-                            hint: receitaVerified
-                              ? 'conferido na Receita Federal (BrasilAPI)'
-                              : 'não conferido na Receita',
-                          },
-                          {
-                            filled: lead.rating_maps > 0 || mapsVerified,
-                            verified: mapsVerified,
-                            label: mapsVerified
-                              ? `Rating Google Maps: ${lead.rating_maps.toFixed(1)}★`
-                              : (lead.rating_maps > 0 ? `Rating: ${lead.rating_maps.toFixed(1)}★` : 'Rating Maps'),
-                            hint: mapsVerified ? 'conferido no Google Places' : 'valor informado pela IA',
-                          },
-                          {
-                            filled: !!lead.email && lead.email.length > 0,
-                            verified: emailVerified,
-                            label: emailVerified ? 'E-mail validado (MX)' : 'E-mail informado',
-                            hint: emailVerified ? 'domínio com MX válido' : 'MX/SMTP não verificado',
-                          },
-                          {
-                            filled: !!lead.linkedin_url,
-                            verified: false,
-                            label: 'LinkedIn (URL de busca)',
-                            hint: 'perfil não verificado',
-                          },
-                          {
-                            filled: !!lead.whatsapp,
-                            verified: false,
-                            label: 'WhatsApp informado',
-                            hint: 'não conferido na operadora',
-                          },
-                        ].map((v, i) => (
-                          <div key={i} className="flex items-start gap-2 text-xs">
-                            {v.verified ? (
-                              <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#047857' }} />
-                            ) : v.filled ? (
-                              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
-                            ) : (
-                              <Circle className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: 'var(--text-disabled)' }} />
-                            )}
-                            <div className="flex-1">
-                              <div style={{ color: v.filled ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
-                                {v.label}
-                                {!v.filled && <span style={{ color: 'var(--text-tertiary)' }}> — vazio</span>}
-                              </div>
-                              {v.filled && (
-                                <div className="text-[10px]" style={{ color: v.verified ? '#047857' : 'var(--text-tertiary)' }}>
-                                  {v.hint}
+                        {(() => {
+                          type Row = {
+                            field: string
+                            value: string | null
+                            source: 'receita_federal' | 'google_places' | 'linkedin' | 'email_mx' | 'ai' | 'empty'
+                          }
+                          const rows: Row[] = [
+                            {
+                              field: 'CNPJ',
+                              value: lead.cnpj || null,
+                              source: receitaVerified && lead.cnpj ? 'receita_federal' : lead.cnpj ? 'ai' : 'empty',
+                            },
+                            {
+                              field: 'Razão social',
+                              value: lead.razao_social || null,
+                              source: receitaVerified && lead.razao_social ? 'receita_federal' : lead.razao_social ? 'ai' : 'empty',
+                            },
+                            {
+                              field: 'Endereço',
+                              value: lead.endereco || (lead.cidade && lead.estado ? `${lead.cidade}/${lead.estado}` : null),
+                              source: receitaVerified && (lead.endereco || lead.cidade) ? 'receita_federal' : (lead.cidade ? 'ai' : 'empty'),
+                            },
+                            {
+                              field: 'CNAE / Segmento',
+                              value: lead.cnae_descricao || lead.segmento || null,
+                              source: receitaVerified && lead.cnae_descricao ? 'receita_federal' : (lead.segmento ? 'ai' : 'empty'),
+                            },
+                            {
+                              field: 'Rating Maps',
+                              value: lead.rating_maps > 0 ? `${lead.rating_maps.toFixed(1)}★ (${lead.total_avaliacoes} reviews)` : null,
+                              source: mapsVerified ? 'google_places' : (lead.rating_maps > 0 ? 'ai' : 'empty'),
+                            },
+                            {
+                              field: 'Telefone',
+                              value: lead.telefone || null,
+                              source: receitaVerified && lead.telefone ? 'receita_federal' : (lead.telefone ? 'ai' : 'empty'),
+                            },
+                            {
+                              field: 'WhatsApp',
+                              value: lead.whatsapp || null,
+                              source: lead.whatsapp ? 'ai' : 'empty',
+                            },
+                            {
+                              field: 'E-mail',
+                              value: lead.email || null,
+                              source: emailVerified ? 'email_mx' : (receitaVerified && lead.email ? 'receita_federal' : (lead.email ? 'ai' : 'empty')),
+                            },
+                            {
+                              field: 'LinkedIn',
+                              value: lead.linkedin_url ? 'URL de busca' : null,
+                              source: lead.linkedin_url ? 'linkedin' : 'empty',
+                            },
+                            {
+                              field: 'Decisor',
+                              value: lead.decisor_nome || null,
+                              source: receitaVerified && lead.decisor_nome ? 'receita_federal' : (lead.decisor_nome ? 'ai' : 'empty'),
+                            },
+                          ]
+                          return rows.map((r, i) => (
+                            <div key={i} className="flex items-start gap-2 text-xs">
+                              <SourceBrandBadge source={r.source} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-baseline gap-1.5">
+                                  <span className="font-medium" style={{ color: r.value ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                                    {r.field}
+                                  </span>
+                                  {!r.value && (
+                                    <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                                      sem dado
+                                    </span>
+                                  )}
                                 </div>
-                              )}
+                                {r.value && (
+                                  <div
+                                    className="truncate text-[11px]"
+                                    style={{ color: 'var(--text-secondary)' }}
+                                    title={r.value}
+                                  >
+                                    {r.value}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          ))
+                        })()}
+                      </div>
+
+                      {/* Legenda discreta com os ícones + o que cada um significa */}
+                      <div
+                        className="mt-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px]"
+                        style={{ borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)' }}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <SourceBrandBadge source="receita_federal" /> Receita Federal
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <SourceBrandBadge source="google_places" /> Google
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <SourceBrandBadge source="linkedin" /> LinkedIn
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <SourceBrandBadge source="email_mx" /> MX check
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <SourceBrandBadge source="ai" /> Sugestão IA
+                        </span>
                       </div>
                     </div>
                   </>
@@ -1370,6 +1418,156 @@ function ActivityLog({ entries }: { entries: LogEntry[] }) {
 
 // ─── Google logo (inline, official colors) ─────────────────────────────────
 
+// ─── Official source brand icons (Phase D) ───
+// Usado no badge de fonte dos campos de um lead. Não inventamos ícones
+// — reproduzimos os logos oficiais de cada plataforma para que o cliente
+// reconheça de imediato de onde veio cada dado.
+
+/** Google "G" multicolor oficial (4 cores). Usado pra Google Places/Maps. */
+function GoogleGIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Google" style={{ display: 'block' }}>
+      <path
+        fill="#4285F4"
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+      />
+    </svg>
+  )
+}
+
+/** LinkedIn "in" oficial em azul corporativo #0A66C2. */
+function LinkedInIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="LinkedIn" style={{ display: 'block' }}>
+      <path
+        fill="#0A66C2"
+        d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.063 2.063 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"
+      />
+    </svg>
+  )
+}
+
+/** Brasão da Receita Federal estilizado — cores oficiais da bandeira BR
+ *  (verde #009C3B + amarelo #FFDF00). Pragmaticamente reconhecível como
+ *  "instituição pública brasileira" sem reproduzir o brasão da República
+ *  (que tem restrições de uso). Usado pra dados vindos da Receita. */
+function ReceitaFederalIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Receita Federal" style={{ display: 'block' }}>
+      {/* Escudo verde (bandeira BR) */}
+      <path
+        fill="#009C3B"
+        d="M12 1 3 4v7.2c0 4.5 3.1 8.7 9 10.8 5.9-2.1 9-6.3 9-10.8V4L12 1z"
+      />
+      {/* Contorno amarelo */}
+      <path
+        fill="none"
+        stroke="#FFDF00"
+        strokeWidth="1"
+        d="M12 1 3 4v7.2c0 4.5 3.1 8.7 9 10.8 5.9-2.1 9-6.3 9-10.8V4L12 1z"
+      />
+      {/* Letras "RF" brancas */}
+      <text
+        x="12"
+        y="15.5"
+        textAnchor="middle"
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        fontSize="9"
+        fontWeight="800"
+        fill="#FFFFFF"
+      >
+        RF
+      </text>
+    </svg>
+  )
+}
+
+/** E-mail verified (MX check) — envelope com checkmark. */
+function EmailMxIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="E-mail validado (MX)" style={{ display: 'block' }}>
+      <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="#047857" strokeWidth="1.8" />
+      <path d="M3 7l9 6 9-6" fill="none" stroke="#047857" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="19" cy="6" r="4" fill="#10B981" />
+      <path d="M17 6l1.2 1.2L21 4.5" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/** "IA" badge quando o dado veio da LLM sem verificação externa. */
+function AiBadgeIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Sugestão da IA" style={{ display: 'block' }}>
+      <circle cx="12" cy="12" r="10" fill="#F59E0B" />
+      <text
+        x="12"
+        y="15.5"
+        textAnchor="middle"
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+        fontSize="8"
+        fontWeight="800"
+        fill="#FFFFFF"
+      >
+        IA
+      </text>
+    </svg>
+  )
+}
+
+/** Vazio — campo sem dado disponível. */
+function EmptySourceIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Sem dado" style={{ display: 'block' }}>
+      <circle cx="12" cy="12" r="10" fill="none" stroke="#9BA3B0" strokeWidth="1.5" strokeDasharray="2 2" />
+    </svg>
+  )
+}
+
+/**
+ * Exibe o ícone oficial da fonte de um campo do lead + tooltip acessível.
+ * Renderiza em posição inline, pensado pra ficar ao lado de um label curto.
+ */
+function SourceBrandBadge({
+  source,
+}: {
+  source: 'receita_federal' | 'google_places' | 'linkedin' | 'email_mx' | 'ai' | 'empty'
+}) {
+  const config: Record<
+    typeof source,
+    { Icon: (props: { size?: number }) => React.ReactElement; label: string }
+  > = {
+    receita_federal: { Icon: ReceitaFederalIcon, label: 'Fonte: Receita Federal (BrasilAPI)' },
+    google_places: { Icon: GoogleGIcon, label: 'Fonte: Google Maps / Places' },
+    linkedin: { Icon: LinkedInIcon, label: 'Fonte: LinkedIn' },
+    email_mx: { Icon: EmailMxIcon, label: 'Validado via MX check' },
+    ai: { Icon: AiBadgeIcon, label: 'Sugestão da IA · não verificado externamente' },
+    empty: { Icon: EmptySourceIcon, label: 'Sem dado disponível' },
+  }
+  const { Icon, label } = config[source]
+  return (
+    <span
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white"
+      style={{ border: '1px solid var(--border)' }}
+      title={label}
+    >
+      <Icon size={12} />
+    </span>
+  )
+}
+
+/** Logo Google inteiro (palavra completa) — mantido pra compatibilidade. */
 function GoogleLogo() {
   return (
     <svg

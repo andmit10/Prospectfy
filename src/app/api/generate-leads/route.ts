@@ -990,6 +990,97 @@ REGRAS FINAIS:
           })
         }
 
+        // Fallback crítico: quando BrasilAPI retornou dados REAIS (receitaData),
+        // mas o Claude falhou (schema inválido, timeout, não retornou, etc),
+        // construímos o lead direto da Receita. Dados de identidade são ground
+        // truth — o enriquecimento IA (decisor/mensagem) é bonus, não obrigatório.
+        // Sem este fallback, o usuário via "Empresa não localizada" mesmo quando
+        // a Receita confirmou a existência — péssima UX.
+        if (validLeads.length === 0 && receitaData && isSearch) {
+          sendEvent(controller, encoder, {
+            type: 'log',
+            level: 'warn',
+            message: 'IA não retornou enriquecimento — usando dados da Receita Federal diretamente.',
+          })
+
+          const r = receitaData
+          const enderecoLinha = [r.logradouro, r.numero, r.bairro].filter(Boolean).join(', ')
+
+          // Map Receita porte to our schema values.
+          const porteMap: Record<string, string> = {
+            'MICRO EMPRESA': 'ME',
+            'EMPRESA DE PEQUENO PORTE': 'EPP',
+            'DEMAIS': 'Média',
+          }
+          const porteReceita = r.porte ? (porteMap[r.porte.toUpperCase()] ?? r.porte) : ''
+
+          // Primary decisor from QSA when available.
+          const primarioSocio = r.socios[0]
+          const outrosSocios = r.socios.slice(1, 4)
+
+          const fallbackLead: z.infer<typeof leadSchema> = {
+            empresa_nome: r.nome_fantasia || r.razao_social,
+            razao_social: r.razao_social,
+            nome_fantasia: r.nome_fantasia ?? '',
+            cnpj: r.cnpj_formatted,
+            cnpj_ativo: r.cnpj_ativo,
+            situacao_cadastral: r.situacao_cadastral,
+            endereco: enderecoLinha,
+            cidade: r.cidade ?? '',
+            estado: r.estado ?? '',
+            cnae_descricao: r.cnae_fiscal_descricao ?? '',
+            segmento: r.cnae_fiscal_descricao ?? '',
+            porte: porteReceita,
+            funcionarios_estimados: 0,
+            telefone: r.telefone ?? '',
+            email: r.email ?? '',
+            whatsapp: '', // Receita não fornece distinção móvel/fixo — não inventar
+            linkedin_url: `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(r.nome_fantasia || r.razao_social)}`,
+            rating_maps: 0,
+            total_avaliacoes: 0,
+            decisor_nome: primarioSocio?.nome ?? '',
+            decisor_cargo: primarioSocio?.qualificacao ?? 'Sócio',
+            decisores: r.socios.length > 0
+              ? [
+                  {
+                    nome: primarioSocio!.nome,
+                    cargo: primarioSocio!.qualificacao ?? 'Sócio',
+                    email: '',
+                    whatsapp: '',
+                    linkedin_url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(primarioSocio!.nome + ' ' + (r.nome_fantasia || r.razao_social))}`,
+                    principal: true,
+                  },
+                  ...outrosSocios.map((s) => ({
+                    nome: s.nome,
+                    cargo: s.qualificacao ?? 'Sócio',
+                    email: '',
+                    whatsapp: '',
+                    linkedin_url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(s.nome + ' ' + (r.nome_fantasia || r.razao_social))}`,
+                    principal: false,
+                  })),
+                ]
+              : [],
+            score: r.cnpj_ativo ? 55 : 20, // Receita ok = baseline; inativa = baixo
+            score_detalhes: {
+              maps_presenca: 0,
+              decisor_encontrado: r.socios.length > 0 ? 15 : 0,
+              email_validado: r.email ? 10 : 0,
+              linkedin_ativo: 0,
+              porte_match: porteReceita ? 10 : 0,
+            },
+            justificativa_score: r.cnpj_ativo
+              ? `Empresa ATIVA na Receita Federal (${r.razao_social}). ${r.socios.length > 0 ? `${r.socios.length} sócio(s) identificado(s) no QSA.` : 'Sem QSA detalhado na Receita.'} Dados de rating, LinkedIn e e-mail precisam ser enriquecidos manualmente ou via integrações.`
+              : `ATENÇÃO: situação cadastral é ${r.situacao_cadastral} (não ATIVA). Verifique antes de prospectar.`,
+            horario_ideal: 'Segunda a quarta, 9h–11h ou 14h–16h (horário comercial B2B)',
+            mensagem_whatsapp: '',
+            mensagem_email_assunto: '',
+            mensagem_email_corpo: '',
+            verified_sources: ['receita_federal'],
+          }
+
+          validLeads.push(fallbackLead)
+        }
+
         if (validLeads.length === 0) {
           const firstErr = z.array(leadSchema).safeParse(combined)
           if (!firstErr.success) console.error('Lead schema validation failed:', firstErr.error.flatten())
