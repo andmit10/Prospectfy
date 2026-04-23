@@ -469,7 +469,7 @@ export const channelsRouter = router({
 
   /**
    * Returns whether the Managed Unipile option is available in this
-   * environment. When false, the UI hides the "Prospectfy gerencia"
+   * environment. When false, the UI hides the "Ativafy gerencia"
    * card and only offers BYOU.
    */
   linkedinManagedAvailable: orgProcedure.query(() => {

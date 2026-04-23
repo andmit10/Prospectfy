@@ -22,7 +22,7 @@ describe('logger', () => {
     expect(logSpy).toHaveBeenCalledTimes(1)
     const [line] = logSpy.mock.calls[0] as [string]
     const parsed = JSON.parse(line)
-    expect(parsed).toMatchObject({ level: 'info', msg: 'hello', foo: 'bar', app: 'prospectfy' })
+    expect(parsed).toMatchObject({ level: 'info', msg: 'hello', foo: 'bar', app: 'ativafy' })
     expect(parsed.time).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 

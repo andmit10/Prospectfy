@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-export const metadata = { title: 'Design System | Prospectfy' }
+export const metadata = { title: 'Design System | Ativafy' }
 
 export default function DesignSystemPage() {
   return (
@@ -23,7 +23,7 @@ export default function DesignSystemPage() {
       <PageHeader
         icon={Palette}
         title="Design System"
-        description="Tokens, componentes e padrões visuais do Prospectfy"
+        description="Tokens, componentes e padrões visuais do Ativafy"
         breadcrumbs={[
           { label: 'Home', href: '/dashboard' },
           { label: 'Design System' },
@@ -44,7 +44,7 @@ export default function DesignSystemPage() {
       <Section title="Typography" subtitle="Hierarquia tipográfica">
         <div className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-6">
           <h1 className="text-4xl font-bold tracking-tight text-gradient-primary">
-            Prospectfy — prospecção inteligente
+            Ativafy — prospecção inteligente
           </h1>
           <h2 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
             Heading 2 — títulos de seção

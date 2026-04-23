@@ -26,7 +26,7 @@ const serverSchema = z.object({
     .union([z.literal('true'), z.literal('false')])
     .optional()
     .transform((v) => v === 'true'),
-  // Unipile Managed — when set, the UI shows the "Prospectfy gerencia" option
+  // Unipile Managed — when set, the UI shows the "Ativafy gerencia" option
   // in the LinkedIn connection dialog and uses these as the operator-level
   // credentials (versus the BYOU model where the customer supplies their own
   // DSN + apiKey). Missing both envs = BYOU-only mode.

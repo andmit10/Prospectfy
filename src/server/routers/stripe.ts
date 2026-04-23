@@ -29,7 +29,7 @@ function resolvePriceId(plan: string): string {
   if (!priceId) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
-      message: `Plano "${plan}" ainda não está disponível para checkout. Contate comercial@prospectfy.com.br.`,
+      message: `Plano "${plan}" ainda não está disponível para checkout. Contate comercial@ativafy.com.br.`,
     })
   }
   return priceId

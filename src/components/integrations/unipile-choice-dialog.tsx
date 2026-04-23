@@ -28,7 +28,7 @@ import {
  *             pastes DSN + apiKey + accountId. We delegate to the standard
  *             ConnectDialog by calling `onChooseByou()` and closing.
  *
- *   Managed — Prospectfy provisions the Unipile account. We call
+ *   Managed — Ativafy provisions the Unipile account. We call
  *             channels.provisionLinkedinManaged which:
  *               * creates the integration row (status=disconnected)
  *               * adds the linkedin_unipile plan_addons row
@@ -59,7 +59,7 @@ export function UnipileChoiceDialog({
     onSuccess: ({ integrationId: id, authUrl }) => {
       setIntegrationId(id)
       setPhase('waiting')
-      // Open in a new tab so the customer can come back to Prospectfy while we poll.
+      // Open in a new tab so the customer can come back to Ativafy while we poll.
       window.open(authUrl, '_blank', 'noopener,noreferrer')
       utils.channels.list.invalidate()
     },
@@ -110,7 +110,7 @@ export function UnipileChoiceDialog({
               'Escolha como conectar. Você pode mudar depois se quiser.'}
             {phase === 'waiting' &&
               'Abrimos uma nova aba com o login do LinkedIn via Unipile. Conclua por lá — essa janela atualiza sozinha.'}
-            {phase === 'connected' && 'Tudo pronto. Sua conta LinkedIn está ativa no Prospectfy.'}
+            {phase === 'connected' && 'Tudo pronto. Sua conta LinkedIn está ativa no Ativafy.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -153,7 +153,7 @@ export function UnipileChoiceDialog({
                 </p>
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">
                   Você cria uma conta na Unipile e cola as credenciais (DSN + API Key +
-                  Account ID) aqui. Sem custo extra do Prospectfy.
+                  Account ID) aqui. Sem custo extra do Ativafy.
                 </p>
               </div>
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--primary)] group-hover:underline">
@@ -192,11 +192,11 @@ export function UnipileChoiceDialog({
               </div>
               <div>
                 <p className="text-sm font-semibold text-[var(--text-primary)]">
-                  Prospectfy gerencia pra mim
+                  Ativafy gerencia pra mim
                 </p>
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">
                   A gente cria a conta Unipile, você só faz login no LinkedIn. Cobrança
-                  junto da sua assinatura do Prospectfy.
+                  junto da sua assinatura do Ativafy.
                   {!managedAvailable && (
                     <span className="mt-1 block text-[11px] italic text-[var(--text-tertiary)]">
                       Temporariamente indisponível neste ambiente.

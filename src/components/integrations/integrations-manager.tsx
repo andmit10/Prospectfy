@@ -750,7 +750,7 @@ function TestDialog({
   const [to, setTo] = useState('')
   const [subject, setSubject] = useState('')
   const [content, setContent] = useState(
-    'Mensagem de teste do Prospectfy — chegou? Se sim, a integração está funcionando.'
+    'Mensagem de teste do Ativafy — chegou? Se sim, a integração está funcionando.'
   )
 
   const send = trpc.channels.sendTest.useMutation({
@@ -801,7 +801,7 @@ function TestDialog({
               <Input
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                placeholder="Teste Prospectfy"
+                placeholder="Teste Ativafy"
               />
             </div>
           )}

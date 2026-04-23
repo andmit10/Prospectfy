@@ -276,7 +276,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     channel: 'linkedin',
     name: 'Unipile (LinkedIn)',
     description:
-      'Conecte LinkedIn via Unipile. Dois modelos: BYOU (você contrata Unipile e cola credenciais — grátis para o Prospectfy) ou Managed (Prospectfy gerencia por R$ 299/mês por conta).',
+      'Conecte LinkedIn via Unipile. Dois modelos: BYOU (você contrata Unipile e cola credenciais — grátis para o Ativafy) ou Managed (Ativafy gerencia por R$ 299/mês por conta).',
     risk:
       'LinkedIn proíbe automação no ToS. Unipile é a via mais segura, mas a conta pode ser banida em uso agressivo.',
     priceNote: 'BYOU: grátis · Managed: R$ 299/mês por conta conectada',

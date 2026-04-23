@@ -22,7 +22,7 @@ export default async function OnboardingPage() {
             className="font-display text-3xl font-semibold text-[var(--text-primary)]"
             style={{ letterSpacing: '-0.025em' }}
           >
-            Bem-vindo ao Prospectfy!
+            Bem-vindo ao Ativafy!
           </h1>
           <p className="mt-1 text-[var(--text-secondary)]">
             Configure sua conta em 3 passos rápidos

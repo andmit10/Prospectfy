@@ -2,7 +2,7 @@
 
 Passos que dependem de painéis externos (Vercel, Supabase, Stripe, Directfy,
 Sentry). Cada item indica o estado atual e o que você precisa fazer uma única
-vez para colocar o Prospectfy em produção.
+vez para colocar o Ativafy em produção.
 
 ## 1. Variáveis de ambiente (Vercel)
 

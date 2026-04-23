@@ -63,7 +63,7 @@ export function TrialBadge() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-primary" />
-              {data.blocked ? 'Trial acabou' : 'Seu trial Prospectfy'}
+              {data.blocked ? 'Trial acabou' : 'Seu trial Ativafy'}
             </DialogTitle>
             <DialogDescription>
               {data.blocked

@@ -1,4 +1,4 @@
-# Prospectfy — Mapa de pendências (master list)
+# Ativafy — Mapa de pendências (master list)
 
 > Atualizado em 2026-04-17 por Claude. Esse é o documento canônico do que falta.
 > Lances novos vão pro fim das seções; concluídos viram `[x]`.
@@ -8,7 +8,7 @@
 ## 0. URGENTE / Ação humana imediata
 
 - [ ] **Rotacionar `GLOBAL_API_KEY` do Evolution Go** (vazou no chat ao mandar screenshot do HostGator). Trocar a env `AUTHENTICATION_API_KEY` no `.env` do VPS, atualizar `EVOLUTION_GO_SHARED_GLOBAL_API_KEY` no Vercel + `.env.local`.
-- [ ] Decidir **domínio**: comprar `prospectfy.com.br` agora ou começar com URL `prospectfy.vercel.app`.
+- [x] Decidir **domínio**: `ativafy.com.br` (já registrado na Hostinger) + URL Vercel temporária `prospectfy-u2a3.vercel.app` enquanto DNS não aponta.
 - [ ] Conta **Stripe**: criar produto BR + configurar Customer Portal (necessário pra cobrar).
 - [ ] Conta **Unipile** (se quiser LinkedIn): criar trial em unipile.com.
 
@@ -121,7 +121,7 @@ Código já implementado em `src/server/routers/stripe.ts` + `src/app/api/webhoo
   - `EVOLUTION_GO_SHARED_BASE_URL`, `_GLOBAL_API_KEY`, `_IGNORE_TLS`
   - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (depois)
 - [ ] Verificar GitHub Actions cron (`enqueue` agora em `.github/workflows/`)
-- [ ] Custom domain: configurar `prospectfy.com.br` (ou usar `.vercel.app`)
+- [ ] Custom domain: configurar `ativafy.com.br` no Vercel (DNS + SSL) e atualizar `NEXT_PUBLIC_APP_URL` + Supabase Site URL + Redirect URLs + Google OAuth redirect URI
 - [ ] Forçar HTTPS (default Vercel)
 
 ### Worker BullMQ — opcional MVP

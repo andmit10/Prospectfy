@@ -81,7 +81,7 @@ function make(bindings: Fields): Logger {
   }
 }
 
-export const logger = make({ app: 'prospectfy' })
+export const logger = make({ app: 'ativafy' })
 
 export function childLogger(scope: string, fields?: Fields): Logger {
   return logger.child({ scope, ...(fields ?? {}) })

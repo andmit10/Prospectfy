@@ -232,7 +232,7 @@ export function BillingOverview() {
                 </p>
               </div>
               <a
-                href="mailto:comercial@prospectfy.com.br?subject=Interesse%20no%20plano%20Enterprise&body=Ol%C3%A1%2C%20gostaria%20de%20saber%20mais%20sobre%20o%20plano%20Enterprise%20do%20Prospectfy."
+                href="mailto:comercial@ativafy.com.br?subject=Interesse%20no%20plano%20Enterprise&body=Ol%C3%A1%2C%20gostaria%20de%20saber%20mais%20sobre%20o%20plano%20Enterprise%20do%20Ativafy."
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-colors"
                 style={{
                   backgroundColor: 'var(--primary)',

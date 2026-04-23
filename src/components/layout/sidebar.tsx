@@ -143,13 +143,13 @@ export function Sidebar() {
                 lineHeight: 1,
               }}
             >
-              Prospectfy
+              Ativafy
             </span>
             <span
               className="mt-1 text-[10px] font-medium text-[var(--text-tertiary)] truncate"
               style={{ letterSpacing: '0.02em', lineHeight: 1 }}
             >
-              Prospecção inteligente
+              Ative sua prospecção com IA
             </span>
           </div>
         )}

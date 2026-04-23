@@ -10,8 +10,8 @@ import { themeScript } from '@/components/theme/theme-provider'
 // for Brazilian PME audiences.
 
 export const metadata: Metadata = {
-  title: 'Prospectfy — Prospecção Inteligente',
-  description: 'Plataforma de prospecção B2B WhatsApp-first para PMEs brasileiras',
+  title: 'Ativafy — Ative sua prospecção com IA',
+  description: 'Ative sua prospecção com IA. Plataforma B2B WhatsApp-first para PMEs brasileiras.',
 }
 
 export default function RootLayout({

@@ -90,7 +90,28 @@
       "Bash(python -c ' *)",
       "Bash(node -e ' *)",
       "Bash(node \"C:/Users/amitk/OneDrive/Documentos/Antigravity/Prospectfy/orbya-saas/tmp-analyze-advisors.js\")",
-      "Bash(node -e \"const fs=require\\('fs'\\);const s=fs.readFileSync\\('C:/Users/amitk/OneDrive/Documentos/Antigravity/Prospectfy/orbya-saas/tmp-advisors-out.txt','utf8'\\);console.log\\('OUT LEN:', s.length\\);\")"
+      "Bash(node -e \"const fs=require\\('fs'\\);const s=fs.readFileSync\\('C:/Users/amitk/OneDrive/Documentos/Antigravity/Prospectfy/orbya-saas/tmp-advisors-out.txt','utf8'\\);console.log\\('OUT LEN:', s.length\\);\")",
+      "Bash(curl -sk -X POST https://129.121.51.181/instance/connect -H 'apikey: 0f89d4de79d8d998fd4b153639d0cdcdba95c451f30958846ff8d6ac83cdcba5' -H 'instanceId: 88201043-707d-44ed-81ad-28f7f5fb978e' -H 'Content-Type: application/json' -d '{\"webhookUrl\":\"https://prospectfy-u2a3.vercel.app/api/webhooks/channels/whatsapp/evolution_go?integration=0e95b008-fbbf-4e1f-b5e9-c6fb09045a5f\",\"subscribe\":[\"MESSAGE\",\"SEND_MESSAGE\",\"READ_RECEIPT\",\"CONNECTION\"],\"immediate\":true}')",
+      "Bash(curl -sk https://129.121.51.181/instance/all -H 'apikey: 0f89d4de79d8d998fd4b153639d0cdcdba95c451f30958846ff8d6ac83cdcba5')",
+      "Bash(python -c \"import json, sys; d=json.load\\(sys.stdin\\); [print\\(f\\\\\"{i['name']}: webhook={i['webhook']}, events={i['events']}, connected={i['connected']}\\\\\"\\) for i in d['data']]\")",
+      "Bash(curl -sk -X POST https://129.121.51.181/instance/connect -H 'apikey: 7de788f5-5916-4125-873f-900be935ea18' -H 'Content-Type: application/json' -d '{\"webhookUrl\":\"https://prospectfy-u2a3.vercel.app/api/webhooks/channels/whatsapp/evolution_go?integration=0e95b008-fbbf-4e1f-b5e9-c6fb09045a5f\",\"subscribe\":[\"MESSAGE\",\"SEND_MESSAGE\",\"READ_RECEIPT\",\"CONNECTION\"]}')",
+      "Bash(curl -sk -o /dev/null -w '%{http_code}' -X POST https://129.121.51.181__TRACKED_VAR__ -H 'apikey: 0f89d4de79d8d998fd4b153639d0cdcdba95c451f30958846ff8d6ac83cdcba5' -H 'instanceId: 88201043-707d-44ed-81ad-28f7f5fb978e' -d '{}')",
+      "Bash(curl -sk https://129.121.51.181/instance/all -H 'apikey: __TRACKED_VAR__')",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\);for\\(const i of d.data\\)console.log\\(i.name,'|',i.connected?'connected':'disconnected','|',i.id\\)\")",
+      "Bash(claude mcp *)",
+      "Read(//c/Users/amitk/AppData/Roaming/npm/**)",
+      "Read(//c/Users/amitk/AppData/Local/Programs/**)",
+      "Bash(where.exe claude *)",
+      "Bash(powershell.exe -NoProfile -Command \"Get-Command claude -ErrorAction SilentlyContinue | Select-Object Name, Source\")",
+      "PowerShell(Get-Command claude -ErrorAction SilentlyContinue)",
+      "Bash(node -e \"const fs=require\\('fs'\\); const c=JSON.parse\\(fs.readFileSync\\('C:/Users/amitk/.claude.json','utf8'\\)\\); console.log\\('installMethod:', c.installMethod\\);\")",
+      "PowerShell(Get-ChildItem \"$env:LOCALAPPDATA\\\\claude\" -Recurse -Include \"claude.exe\",\"claude.cmd\",\"claude.ps1\",\"claude\" -ErrorAction SilentlyContinue -Depth 3 | Select-Object FullName | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem \"$env:LOCALAPPDATA\\\\claude\" | Select-Object Name, Mode | Format-Table -AutoSize; Write-Output \"---\"; Test-Path \"$env:LOCALAPPDATA\\\\Programs\\\\claude-code\\\\claude.exe\"; Test-Path \"$env:LOCALAPPDATA\\\\claude\\\\claude.exe\"; Test-Path \"$env:LOCALAPPDATA\\\\claude\\\\bin\\\\claude.exe\")",
+      "Bash(\"/c/Users/amitk/AppData/Roaming/Claude/claude-code/2.1.111/claude.exe\" mcp *)",
+      "Bash(node -e \"const fs=require\\('fs'\\); const c=JSON.parse\\(fs.readFileSync\\('C:/Users/amitk/.claude.json','utf8'\\)\\); const s=c.mcpServers; if\\(!s\\){console.log\\('NO mcpServers'\\);process.exit\\(1\\);} const h=s['hostinger-mcp']; if\\(!h\\){console.log\\('hostinger-mcp NOT FOUND'\\);process.exit\\(1\\);} console.log\\('hostinger-mcp registered:'\\); console.log\\('  type:', h.type\\); console.log\\('  command:', h.command\\); console.log\\('  args:', JSON.stringify\\(h.args\\)\\); console.log\\('  env.API_TOKEN present:', !!\\(h.env && h.env.API_TOKEN\\)\\); console.log\\('  env.API_TOKEN length:', h.env && h.env.API_TOKEN ? h.env.API_TOKEN.length : 0\\);\")",
+      "WebFetch(domain:developers.hostinger.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(curl -s -H \"Authorization: Bearer zbAYJOqBSLR7cPeFzq7mN0Ju0hQAO5LgVCZFSRqm37076ed5\" \"https://developers.hostinger.com/api/domains/v1/portfolio\")"
     ]
   }
 }
