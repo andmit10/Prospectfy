@@ -1115,9 +1115,31 @@ REGRAS FINAIS:
         }
 
         if (validLeads.length === 0) {
-          const firstErr = z.array(leadSchema).safeParse(combined)
-          if (!firstErr.success) console.error('Lead schema validation failed:', firstErr.error.flatten())
-          sendEvent(controller, encoder, { type: 'error', message: 'Leads em formato inválido. Tente novamente.' })
+          // Emit a compact, Vercel-friendly diagnostic. Parse each item in
+          // `combined` individually so we can see WHICH fields are missing
+          // on each lead. Previous .flatten() output was truncated by Vercel.
+          const perItemIssues: string[] = []
+          combined.slice(0, 3).forEach((item, idx) => {
+            const res = leadSchema.safeParse(item)
+            if (!res.success) {
+              const firstThree = res.error.issues.slice(0, 5).map((iss) => {
+                const path = iss.path.join('.')
+                return `${path || '(root)'}: ${iss.message.slice(0, 60)}`
+              })
+              perItemIssues.push(`item[${idx}] ${firstThree.join(' | ')}`)
+            }
+          })
+          log.warn('generate-leads schema fail', {
+            combined_count: combined.length,
+            sample_issues: perItemIssues,
+            first_item_keys: combined[0] && typeof combined[0] === 'object'
+              ? Object.keys(combined[0] as object).slice(0, 20).join(',')
+              : 'none',
+          })
+          sendEvent(controller, encoder, {
+            type: 'error',
+            message: `Leads em formato inválido (IA retornou ${combined.length} itens mas nenhum passou no schema). Tente novamente ou abra /api/debug/test-generate para diagnóstico.`,
+          })
           controller.close()
           return
         }
