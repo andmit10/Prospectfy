@@ -10,6 +10,7 @@ import {
 } from '@/lib/trial/limits'
 import { childLogger } from '@/lib/logger'
 import { enforceRateLimit, clientIdFromRequest } from '@/lib/rate-limit'
+import { verifyCnpj, normalizeCnpj, type CnpjVerified } from '@/lib/verification/cnpj'
 import { z } from 'zod'
 
 const log = childLogger('api:generate-leads')
@@ -120,6 +121,16 @@ const leadSchema = z.object({
   mensagem_email_corpo: z.string().optional().default(''),
   justificativa_score: z.string().optional().default(''),
   horario_ideal: z.string().optional().default(''),
+  // ─── External verification flags (Phase D) ───
+  // List of external sources that confirmed at least one field on this lead.
+  // UI renders green "Verificado" badge when list is non-empty.
+  verified_sources: z.array(z.enum(['receita_federal', 'google_places', 'email_mx'])).optional().default([]),
+  // Extra enrichment fields from Receita (when verified_sources includes receita_federal)
+  razao_social: z.string().optional().default(''),
+  nome_fantasia: z.string().optional().default(''),
+  endereco: z.string().optional().default(''),
+  cnae_descricao: z.string().optional().default(''),
+  situacao_cadastral: z.string().optional().default(''),
 })
 
 // SSE helper: send a JSON event to the stream
@@ -376,6 +387,88 @@ export async function POST(request: NextRequest) {
             : `Buscando empresas de "${segmento}" em ${regiao}...`,
         })
 
+        // ── Phase D: Receita Federal verification (search mode, CNPJ queries) ──
+        // When the user searched by CNPJ, we hit BrasilAPI BEFORE asking the LLM
+        // to generate anything. This gives us ground-truth data (razão social,
+        // endereço, situação cadastral, CNAE, quadro societário) that the LLM
+        // then enriches with decisor message/email copy — without inventing
+        // the base identity fields.
+        let receitaData: CnpjVerified | null = null
+        if (isSearch) {
+          const query = (empresa_busca ?? '').trim()
+          const looksLikeCnpj = /\d{2}[.\-\/]?\d{3}[.\-\/]?\d{3}[.\-\/]?\d{4}[.\-\/]?\d{2}/.test(query)
+
+          if (looksLikeCnpj) {
+            sendEvent(controller, encoder, {
+              type: 'progress',
+              step: 'maps',
+              status: 'running',
+              message: 'Consultando CNPJ na Receita Federal...',
+            })
+
+            const normalized = normalizeCnpj(query)
+            if (!normalized) {
+              sendEvent(controller, encoder, {
+                type: 'error',
+                reason: 'not_found',
+                message: 'CNPJ inválido — os dígitos verificadores não batem. Verifique o número digitado.',
+              })
+              controller.close()
+              return
+            }
+
+            const result = await verifyCnpj(query)
+            if (result.verified === false) {
+              if (result.reason === 'not_found') {
+                sendEvent(controller, encoder, {
+                  type: 'error',
+                  reason: 'not_found',
+                  message: `CNPJ ${normalized} não foi localizado na Receita Federal. Confirme o número ou tente outro.`,
+                })
+                controller.close()
+                return
+              }
+              if (result.reason === 'invalid_format') {
+                sendEvent(controller, encoder, {
+                  type: 'error',
+                  reason: 'not_found',
+                  message: 'CNPJ em formato inválido. Use 14 dígitos (com ou sem pontuação).',
+                })
+                controller.close()
+                return
+              }
+              // rate_limited / network_error — fall through to LLM-only mode
+              // but tell the user we couldn't verify so they know the fields
+              // won't carry the ✓ Receita badge.
+              sendEvent(controller, encoder, {
+                type: 'log',
+                level: 'warn',
+                message: result.reason === 'rate_limited'
+                  ? 'Receita Federal retornou rate limit — gerando sem verificação externa.'
+                  : 'Receita Federal indisponível — gerando sem verificação externa.',
+              })
+            } else {
+              receitaData = result
+              if (!result.cnpj_ativo) {
+                // Still useful: the CNPJ exists but is BAIXADA/SUSPENSA/INAPTA.
+                // We return the data with a warning so the user sees the status
+                // and decides whether to prospect.
+                sendEvent(controller, encoder, {
+                  type: 'log',
+                  level: 'warn',
+                  message: `Atenção: situação cadastral é ${result.situacao_cadastral} (não ATIVA).`,
+                })
+              }
+              sendEvent(controller, encoder, {
+                type: 'progress',
+                step: 'maps',
+                status: 'running',
+                message: `${result.razao_social} localizada na Receita Federal · ${result.situacao_cadastral}`,
+              })
+            }
+          }
+        }
+
         // Legacy env check kept for backwards-compat — Gateway also honors it
         // when Anthropic is the selected provider.
         const apiKey = process.env.AI_SERVICE_KEY ?? process.env.ANTHROPIC_API_KEY
@@ -531,9 +624,97 @@ OUTROS:
 
         // Search-mode prompt: enrich a single company by name or CNPJ.
         // Returns either a single-item array OR a not_found sentinel object.
+        //
+        // Two branches:
+        //   * With receitaData (BrasilAPI hit) → LLM is given ground-truth
+        //     identity and only enriches decisor/mensagem. This is the
+        //     "vendable" path: CNPJ/nome/endereço are real.
+        //   * Without receitaData (name query or BrasilAPI down) → LLM-only
+        //     path with strict not_found fallback. UI will mark everything as
+        //     "não verificado".
         function buildSearchPrompt(): string {
           const query = (empresa_busca ?? '').trim()
           const looksLikeCnpj = /\d{2}[.\-\/]?\d{3}[.\-\/]?\d{3}[.\-\/]?\d{4}[.\-\/]?\d{2}/.test(query)
+
+          // Path A: we have ground-truth data from Receita Federal. LLM's job
+          // is ONLY to generate decisor entries (using the socios list when
+          // available) and the sales copy.
+          if (receitaData) {
+            const r = receitaData
+            const sociosBlock = r.socios.length
+              ? r.socios
+                  .map((s, i) => `  ${i + 1}. ${s.nome}${s.qualificacao ? ` — ${s.qualificacao}` : ''}`)
+                  .join('\n')
+              : '  (Receita não retornou quadro societário)'
+            const enderecoLinha = [r.logradouro, r.numero, r.bairro].filter(Boolean).join(', ')
+            return `Você é um sistema de enriquecimento B2B. Os dados de identidade da empresa abaixo JÁ FORAM VERIFICADOS na Receita Federal (via BrasilAPI). Você deve APENAS:
+1. Gerar o array de decisores (usando o quadro societário abaixo quando útil)
+2. Gerar mensagem_whatsapp, mensagem_email_assunto, mensagem_email_corpo, justificativa_score, horario_ideal, score (com score_detalhes)
+3. Deduzir segmento com base no CNAE
+4. COPIAR os dados da Receita nos campos indicados (NÃO inventar razão social, CNPJ, endereço, cidade, estado)
+
+DADOS VERIFICADOS (use exatamente estes valores nos campos correspondentes):
+- CNPJ: ${r.cnpj_formatted}
+- Razão social: ${r.razao_social}
+- Nome fantasia: ${r.nome_fantasia ?? '(não consta na Receita)'}
+- Situação cadastral: ${r.situacao_cadastral}${r.cnpj_ativo ? ' (ativa)' : ' (NÃO ATIVA — alerte o usuário na justificativa)'}
+- Endereço: ${enderecoLinha || '(não consta)'}
+- Cidade/UF: ${r.cidade ?? '—'}/${r.estado ?? '—'}
+- CEP: ${r.cep ?? '—'}
+- CNAE: ${r.cnae_fiscal_codigo ?? '—'} — ${r.cnae_fiscal_descricao ?? '—'}
+- Porte Receita: ${r.porte ?? '—'}
+- Capital social: ${r.capital_social ? `R$ ${r.capital_social.toLocaleString('pt-BR')}` : '—'}
+- Data início atividade: ${r.data_inicio_atividade ?? '—'}
+- Natureza jurídica: ${r.natureza_juridica ?? '—'}
+- E-mail cadastrado na Receita: ${r.email ?? '(não consta)'}
+- Telefone cadastrado: ${r.telefone ?? '(não consta)'}
+- Quadro societário (QSA):
+${sociosBlock}
+
+RETORNE APENAS um array JSON com 1 item:
+[{
+  "empresa_nome": "${r.nome_fantasia || r.razao_social}",
+  "razao_social": "${r.razao_social}",
+  "nome_fantasia": "${r.nome_fantasia ?? ''}",
+  "cnpj": "${r.cnpj_formatted}",
+  "cnpj_ativo": ${r.cnpj_ativo},
+  "situacao_cadastral": "${r.situacao_cadastral}",
+  "endereco": "${enderecoLinha}",
+  "cidade": "${r.cidade ?? ''}",
+  "estado": "${r.estado ?? ''}",
+  "cnae_descricao": "${(r.cnae_fiscal_descricao ?? '').replace(/"/g, '\\"')}",
+  "segmento": "<deduza do CNAE — ex: 'Comércio varejista de vestuário', 'Restaurantes', 'Consultoria em TI'>",
+  "porte": "<mapeie do porte Receita: 'MICRO EMPRESA'→'MEI' ou 'ME', 'EMPRESA DE PEQUENO PORTE'→'EPP', 'DEMAIS'→'Média' ou 'Grande' baseado em capital/idade>",
+  "funcionarios_estimados": "<estime com base no porte e CNAE, número>",
+  "telefone": "${r.telefone ?? ''}",
+  "email": "${r.email ?? ''}",
+  "whatsapp": "<se telefone acima é móvel (começa com 9 após DDD), use-o em formato 55DDDDDDDDDDD; senão null>",
+  "linkedin_url": "https://www.linkedin.com/search/results/companies/?keywords=<nome da empresa URL-encoded>",
+  "website": null,
+  "rating_maps": 0,
+  "total_avaliacoes": 0,
+  "decisor_nome": "<primeiro nome do QSA, se houver — senão '' e deixe para o usuário preencher>",
+  "decisor_cargo": "<qualificacao do primeiro sócio, ex: 'Sócio Administrador'>",
+  "decisores": [
+    <uma entrada para cada sócio do QSA (até 4), usando 'Sócio Administrador' como cargo se a qualificacao não disser outro cargo. Cada entrada: { nome, cargo, email: null, whatsapp: null, linkedin_url: "https://www.linkedin.com/search/results/people/?keywords=<nome+empresa>", principal: <true para o primeiro, false para os outros> }>
+  ],
+  "score": <0-100>,
+  "score_detalhes": { "maps_presenca": <0-20>, "decisor_encontrado": <0-25>, "email_validado": <0-20>, "linkedin_ativo": <0-20>, "porte_match": <0-15> },
+  "justificativa_score": "<1-2 frases: cite situação cadastral, CNAE, porte. Se situação ≠ ATIVA, alerte para validar antes de prospectar>",
+  "horario_ideal": "<dia + janela de horário ideal para primeiro contato B2B>",
+  "mensagem_whatsapp": "<2-3 parágrafos curtos usando [Nome] e [Empresa Usuário] como placeholders, CTA reunião 15min>",
+  "mensagem_email_assunto": "<assunto curto>",
+  "mensagem_email_corpo": "<3 parágrafos com [Nome], [Empresa], [Seu Nome]>"
+}]
+
+REGRAS:
+- linkedin_url SEMPRE em formato de busca. NUNCA invente /in/<slug>.
+- NUNCA sobrescreva os dados de identidade (CNPJ/razão/endereço) — use EXATAMENTE como veio da Receita.
+- E-mails, website, rating Maps NÃO foram verificados. Se não souber, deixe null/0 — NUNCA invente.
+- RESPONDA APENAS COM O ARRAY JSON, sem markdown.`
+          }
+
+          // Path B: no Receita data (nome query or BrasilAPI failed).
           return `Você é um sistema de enriquecimento de empresas B2B brasileiras.
 A query do usuário é: "${query}".
 ${looksLikeCnpj ? 'A query parece um CNPJ.' : 'A query é um nome de empresa.'}
@@ -748,6 +929,30 @@ REGRAS FINAIS:
           const { lead, flags } = sanitizeLead(ok.data)
           if (flags.cnpjStripped) cnpjStrippedCount++
           if (flags.telefoneStripped || flags.whatsappStripped) phoneStrippedCount++
+
+          // Phase D: if we have ground-truth Receita data, OVERWRITE the
+          // identity fields on the lead so the LLM can't accidentally
+          // fabricate anything different. Mark the source for UI badge.
+          if (receitaData && isSearch) {
+            lead.cnpj = receitaData.cnpj_formatted
+            lead.cnpj_ativo = receitaData.cnpj_ativo
+            lead.razao_social = receitaData.razao_social
+            lead.nome_fantasia = receitaData.nome_fantasia ?? ''
+            lead.empresa_nome = receitaData.nome_fantasia || receitaData.razao_social
+            lead.cidade = receitaData.cidade ?? lead.cidade
+            lead.estado = receitaData.estado ?? lead.estado
+            lead.situacao_cadastral = receitaData.situacao_cadastral
+            lead.cnae_descricao = receitaData.cnae_fiscal_descricao ?? ''
+            const enderecoLinha = [receitaData.logradouro, receitaData.numero, receitaData.bairro]
+              .filter(Boolean)
+              .join(', ')
+            lead.endereco = enderecoLinha
+            // Prefer Receita phone/email over LLM guesses when Receita has them.
+            if (receitaData.telefone) lead.telefone = receitaData.telefone
+            if (receitaData.email) lead.email = receitaData.email
+            // Flag the source so UI renders green "Verificado" badge.
+            lead.verified_sources = Array.from(new Set([...(lead.verified_sources ?? []), 'receita_federal']))
+          }
 
           const companyKey = lead.empresa_nome.trim().toLowerCase()
 

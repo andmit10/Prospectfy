@@ -132,6 +132,11 @@ type GeneratedLead = {
   mensagem_email_corpo?: string
   justificativa_score?: string
   horario_ideal?: string
+  // Phase D — external verification flags
+  verified_sources?: Array<'receita_federal' | 'google_places' | 'email_mx'>
+  situacao_cadastral?: string
+  cnae_descricao?: string
+  endereco?: string
 }
 
 type StatusFilter = 'all' | 'email' | 'linkedin' | 'partial' | 'pending' | 'cnpj_invalid'
@@ -774,56 +779,125 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
               </div>
             </div>
 
-            {/* Right: dados informados (não verificados) + rating */}
+            {/* Right: validações por fonte + rating */}
             <div className="col-span-4 space-y-4">
-              {/* Disclaimer: dados gerados por IA */}
-              <div
-                className="flex items-start gap-2 rounded-lg p-3 text-xs"
-                style={{
-                  backgroundColor: 'color-mix(in oklab, #F59E0B 8%, var(--surface-2))',
-                  border: '1px solid color-mix(in oklab, #F59E0B 30%, var(--border))',
-                  color: 'var(--text-primary)',
-                }}
-              >
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
-                <span>
-                  Dados gerados por IA a partir do nome/CNPJ informado.{' '}
-                  <strong>Valide manualmente antes de disparar mensagens</strong> — nenhum dado foi
-                  conferido em Receita, Google Maps, LinkedIn ou operadora.
-                </span>
-              </div>
+              {(() => {
+                const sources = lead.verified_sources ?? []
+                const receitaVerified = sources.includes('receita_federal')
+                const mapsVerified = sources.includes('google_places')
+                const emailVerified = sources.includes('email_mx')
 
-              <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>
-                  DADOS INFORMADOS · NÃO VERIFICADOS
-                </p>
-                <div className="space-y-2.5">
-                  {[
-                    { filled: !!lead.cnpj && lead.cnpj.length > 0, label: 'CNPJ informado', hint: 'não conferido na Receita' },
-                    { filled: lead.rating_maps > 0, label: lead.rating_maps > 0 ? `Rating Maps: ${lead.rating_maps.toFixed(1)}★` : 'Rating Maps', hint: 'valor informado pela IA' },
-                    { filled: !!lead.email && lead.email.length > 0, label: 'E-mail informado', hint: 'MX/SMTP não verificado' },
-                    { filled: !!lead.linkedin_url, label: 'LinkedIn (URL de busca)', hint: 'perfil não verificado' },
-                    { filled: !!lead.whatsapp, label: 'WhatsApp informado', hint: 'não conferido na operadora' },
-                  ].map((v, i) => (
-                    <div key={i} className="flex items-start gap-2 text-xs">
-                      {v.filled ? (
-                        <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
+                // Banner: verde se algo foi verificado externamente, amarelo se
+                // tudo veio só da IA sem conferência de fonte externa.
+                const hasAnyExternal = receitaVerified || mapsVerified || emailVerified
+
+                return (
+                  <>
+                    <div
+                      className="flex items-start gap-2 rounded-lg p-3 text-xs"
+                      style={{
+                        backgroundColor: hasAnyExternal
+                          ? 'color-mix(in oklab, #10B981 8%, var(--surface-2))'
+                          : 'color-mix(in oklab, #F59E0B 8%, var(--surface-2))',
+                        border: hasAnyExternal
+                          ? '1px solid color-mix(in oklab, #10B981 35%, var(--border))'
+                          : '1px solid color-mix(in oklab, #F59E0B 30%, var(--border))',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      {hasAnyExternal ? (
+                        <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#047857' }} />
                       ) : (
-                        <Circle className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: 'var(--text-disabled)' }} />
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
                       )}
-                      <div className="flex-1">
-                        <div style={{ color: v.filled ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
-                          {v.label}
-                          {!v.filled && <span style={{ color: 'var(--text-tertiary)' }}> — vazio</span>}
-                        </div>
-                        {v.filled && (
-                          <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{v.hint}</div>
+                      <span>
+                        {receitaVerified ? (
+                          <>
+                            <strong>CNPJ, razão social e endereço verificados na Receita Federal</strong>
+                            {' '}(via BrasilAPI).
+                            {!mapsVerified && !emailVerified && (
+                              <> Decisor, e-mail, WhatsApp e rating Maps ainda são <strong>sugestões da IA</strong> — valide antes de disparar.</>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            Dados gerados por IA a partir do nome/CNPJ informado.{' '}
+                            <strong>Valide manualmente antes de disparar mensagens</strong> — nenhum dado foi
+                            conferido em Receita, Google Maps, LinkedIn ou operadora.
+                          </>
                         )}
+                      </span>
+                    </div>
+
+                    <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                      <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>
+                        VALIDAÇÃO POR FONTE
+                      </p>
+                      <div className="space-y-2.5">
+                        {[
+                          {
+                            filled: !!lead.cnpj && lead.cnpj.length > 0,
+                            verified: receitaVerified,
+                            label: receitaVerified
+                              ? `CNPJ ${lead.situacao_cadastral || 'verificado'}`
+                              : 'CNPJ informado',
+                            hint: receitaVerified
+                              ? 'conferido na Receita Federal (BrasilAPI)'
+                              : 'não conferido na Receita',
+                          },
+                          {
+                            filled: lead.rating_maps > 0 || mapsVerified,
+                            verified: mapsVerified,
+                            label: mapsVerified
+                              ? `Rating Google Maps: ${lead.rating_maps.toFixed(1)}★`
+                              : (lead.rating_maps > 0 ? `Rating: ${lead.rating_maps.toFixed(1)}★` : 'Rating Maps'),
+                            hint: mapsVerified ? 'conferido no Google Places' : 'valor informado pela IA',
+                          },
+                          {
+                            filled: !!lead.email && lead.email.length > 0,
+                            verified: emailVerified,
+                            label: emailVerified ? 'E-mail validado (MX)' : 'E-mail informado',
+                            hint: emailVerified ? 'domínio com MX válido' : 'MX/SMTP não verificado',
+                          },
+                          {
+                            filled: !!lead.linkedin_url,
+                            verified: false,
+                            label: 'LinkedIn (URL de busca)',
+                            hint: 'perfil não verificado',
+                          },
+                          {
+                            filled: !!lead.whatsapp,
+                            verified: false,
+                            label: 'WhatsApp informado',
+                            hint: 'não conferido na operadora',
+                          },
+                        ].map((v, i) => (
+                          <div key={i} className="flex items-start gap-2 text-xs">
+                            {v.verified ? (
+                              <ShieldCheck className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#047857' }} />
+                            ) : v.filled ? (
+                              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
+                            ) : (
+                              <Circle className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: 'var(--text-disabled)' }} />
+                            )}
+                            <div className="flex-1">
+                              <div style={{ color: v.filled ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                                {v.label}
+                                {!v.filled && <span style={{ color: 'var(--text-tertiary)' }}> — vazio</span>}
+                              </div>
+                              {v.filled && (
+                                <div className="text-[10px]" style={{ color: v.verified ? '#047857' : 'var(--text-tertiary)' }}>
+                                  {v.hint}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </>
+                )
+              })()}
 
               <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
                 <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>GOOGLE MAPS</p>
