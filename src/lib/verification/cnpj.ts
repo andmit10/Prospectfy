@@ -30,14 +30,44 @@ export type CnpjVerified = {
   cep: string | null
   email: string | null // email on file at Receita (rarely set, but useful when it is)
   telefone: string | null // phone on file at Receita
+  telefone_mobile: boolean // true when telefone looks like a cell number (9 after DDD)
   cnae_fiscal_codigo: string | null
   cnae_fiscal_descricao: string | null
   porte: string | null // "MICRO EMPRESA" | "EMPRESA DE PEQUENO PORTE" | "DEMAIS"
   capital_social: number | null
   data_inicio_atividade: string | null
   natureza_juridica: string | null
+  /** True when natureza_juridica indicates a solo entity (no QSA expected). */
+  is_solo_entity: boolean
   socios: Array<{ nome: string; qualificacao: string | null }>
   fetched_at: string // ISO timestamp
+}
+
+/** Detect sole-proprietor entities where Receita doesn't expose the titular
+ *  (Empresário Individual, MEI, Empresa Individual de Responsabilidade Limitada).
+ *  For these, the QSA is always empty — it's a feature, not a bug. */
+export function isSoloEntity(naturezaJuridica: string | null): boolean {
+  if (!naturezaJuridica) return false
+  const nj = naturezaJuridica.toLowerCase()
+  return (
+    nj.includes('empresário (individual)') ||
+    nj.includes('empresario (individual)') ||
+    nj.includes('empresário individual') ||
+    nj.includes('mei') ||
+    nj.includes('microempreendedor') ||
+    nj.includes('eireli')
+  )
+}
+
+/** Heuristic: phone is mobile if the 9 digits after DDD start with 9
+ *  (modern Brazilian cellphone format). */
+function isMobilePhone(phone: string | null): boolean {
+  if (!phone) return false
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length < 10) return false
+  // DDD + 9 + 8 digits = 11 total (mobile)
+  if (digits.length === 11 && digits[2] === '9') return true
+  return false
 }
 
 export type CnpjVerificationResult =
@@ -176,6 +206,8 @@ async function tryBrasilApi(
         }))
       : []
 
+    const naturezaJuridica = data.natureza_juridica ? String(data.natureza_juridica) : null
+    const telefone = composeTelefone(data.ddd_telefone_1, data.ddd_telefone_2)
     return {
       kind: 'ok',
       data: {
@@ -195,13 +227,15 @@ async function tryBrasilApi(
         estado: data.uf ? String(data.uf) : null,
         cep: data.cep ? String(data.cep) : null,
         email: data.email ? String(data.email).toLowerCase() : null,
-        telefone: composeTelefone(data.ddd_telefone_1, data.ddd_telefone_2),
+        telefone,
+        telefone_mobile: isMobilePhone(telefone),
         cnae_fiscal_codigo: data.cnae_fiscal ? String(data.cnae_fiscal) : null,
         cnae_fiscal_descricao: data.cnae_fiscal_descricao ? String(data.cnae_fiscal_descricao) : null,
         porte: data.porte ? String(data.porte) : null,
         capital_social: typeof data.capital_social === 'number' ? data.capital_social : null,
         data_inicio_atividade: data.data_inicio_atividade ? String(data.data_inicio_atividade) : null,
-        natureza_juridica: data.natureza_juridica ? String(data.natureza_juridica) : null,
+        natureza_juridica: naturezaJuridica,
+        is_solo_entity: isSoloEntity(naturezaJuridica),
         socios,
         fetched_at: new Date().toISOString(),
       },
@@ -297,6 +331,8 @@ async function tryReceitaWs(
         ? Number(data.capital_social.replace(/[^\d.,]/g, '').replace(',', '.')) || null
         : null
 
+    const naturezaJuridica = data.natureza_juridica ? String(data.natureza_juridica) : null
+    const telefone = data.telefone ? String(data.telefone) : null
     return {
       kind: 'ok',
       data: {
@@ -316,13 +352,15 @@ async function tryReceitaWs(
         estado: data.uf ? String(data.uf) : null,
         cep: data.cep ? String(data.cep) : null,
         email: data.email ? String(data.email).toLowerCase() : null,
-        telefone: data.telefone ? String(data.telefone) : null,
+        telefone,
+        telefone_mobile: isMobilePhone(telefone),
         cnae_fiscal_codigo: atividadePrincipal?.code ?? null,
         cnae_fiscal_descricao: atividadePrincipal?.text ?? null,
         porte: data.porte ? String(data.porte) : null,
         capital_social: typeof capitalSocial === 'number' ? capitalSocial : null,
         data_inicio_atividade: data.abertura ? String(data.abertura) : null,
-        natureza_juridica: data.natureza_juridica ? String(data.natureza_juridica) : null,
+        natureza_juridica: naturezaJuridica,
+        is_solo_entity: isSoloEntity(naturezaJuridica),
         socios,
         fetched_at: new Date().toISOString(),
       },

@@ -950,6 +950,22 @@ REGRAS FINAIS:
             // Prefer Receita phone/email over LLM guesses when Receita has them.
             if (receitaData.telefone) lead.telefone = receitaData.telefone
             if (receitaData.email) lead.email = receitaData.email
+            // If Receita's phone is a cellphone AND LLM didn't supply a
+            // WhatsApp (or gave an obvious-fake one that got stripped),
+            // promote Receita's number to the WhatsApp field.
+            if (receitaData.telefone_mobile && receitaData.telefone && !lead.whatsapp) {
+              lead.whatsapp = `55${receitaData.telefone.replace(/\D/g, '')}`
+            }
+            // For solo entities (EI/MEI), the LLM often guesses a fake
+            // titular name. If the Receita data confirms it's a solo
+            // entity and the LLM didn't pull the name from any QSA
+            // (because there is no QSA), we blank the decisor to avoid
+            // misleading the user.
+            if (receitaData.is_solo_entity && receitaData.socios.length === 0) {
+              lead.decisor_nome = ''
+              lead.decisor_cargo = 'Empresário Individual'
+              lead.decisores = []
+            }
             // Flag the source so UI renders green "Verificado" badge.
             lead.verified_sources = Array.from(new Set([...(lead.verified_sources ?? []), 'receita_federal']))
           }
@@ -1018,6 +1034,21 @@ REGRAS FINAIS:
           const primarioSocio = r.socios[0]
           const outrosSocios = r.socios.slice(1, 4)
 
+          // For solo entities (EI/MEI/EIRELI), Receita doesn't expose the
+          // titular's name — we make that explicit instead of leaving it
+          // empty. The phone/email on file are still useful.
+          // For LTDA/S.A., QSA has real partner names.
+
+          // Auto-populate WhatsApp when Receita's phone is a cell number.
+          // This is the difference between "tem contato" vs "sem contato".
+          const whatsappFromReceita = r.telefone_mobile && r.telefone
+            ? `55${r.telefone.replace(/\D/g, '')}`
+            : ''
+
+          const decisorCargo = r.is_solo_entity
+            ? 'Empresário Individual'
+            : primarioSocio?.qualificacao ?? 'Sócio'
+
           const fallbackLead: z.infer<typeof leadSchema> = {
             empresa_nome: r.nome_fantasia || r.razao_social,
             razao_social: r.razao_social,
@@ -1034,12 +1065,12 @@ REGRAS FINAIS:
             funcionarios_estimados: 0,
             telefone: r.telefone ?? '',
             email: r.email ?? '',
-            whatsapp: '', // Receita não fornece distinção móvel/fixo — não inventar
+            whatsapp: whatsappFromReceita,
             linkedin_url: `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(r.nome_fantasia || r.razao_social)}`,
             rating_maps: 0,
             total_avaliacoes: 0,
             decisor_nome: primarioSocio?.nome ?? '',
-            decisor_cargo: primarioSocio?.qualificacao ?? 'Sócio',
+            decisor_cargo: decisorCargo,
             decisores: r.socios.length > 0
               ? [
                   {
@@ -1060,7 +1091,7 @@ REGRAS FINAIS:
                   })),
                 ]
               : [],
-            score: r.cnpj_ativo ? 55 : 20, // Receita ok = baseline; inativa = baixo
+            score: r.cnpj_ativo ? (r.is_solo_entity ? 50 : 55) : 20,
             score_detalhes: {
               maps_presenca: 0,
               decisor_encontrado: r.socios.length > 0 ? 15 : 0,
@@ -1068,9 +1099,11 @@ REGRAS FINAIS:
               linkedin_ativo: 0,
               porte_match: porteReceita ? 10 : 0,
             },
-            justificativa_score: r.cnpj_ativo
-              ? `Empresa ATIVA na Receita Federal (${r.razao_social}). ${r.socios.length > 0 ? `${r.socios.length} sócio(s) identificado(s) no QSA.` : 'Sem QSA detalhado na Receita.'} Dados de rating, LinkedIn e e-mail precisam ser enriquecidos manualmente ou via integrações.`
-              : `ATENÇÃO: situação cadastral é ${r.situacao_cadastral} (não ATIVA). Verifique antes de prospectar.`,
+            justificativa_score: !r.cnpj_ativo
+              ? `ATENÇÃO: situação cadastral é ${r.situacao_cadastral} (não ATIVA). Verifique antes de prospectar.`
+              : r.is_solo_entity
+                ? `Empresa ATIVA na Receita Federal (${r.razao_social}) — tipo "${r.natureza_juridica}". Como é empresário individual, a Receita não expõe o nome do titular (proteção de CPF). Use o botão "Buscar no LinkedIn" ou pesquise no site da empresa para identificar o decisor.${whatsappFromReceita ? ' ✓ WhatsApp da empresa extraído da Receita.' : ''}`
+                : `Empresa ATIVA na Receita Federal (${r.razao_social}). ${r.socios.length > 0 ? `${r.socios.length} sócio(s) identificado(s) no QSA.` : 'Sem QSA detalhado na Receita.'} Dados de rating, LinkedIn e e-mail precisam ser enriquecidos manualmente ou via integrações.`,
             horario_ideal: 'Segunda a quarta, 9h–11h ou 14h–16h (horário comercial B2B)',
             mensagem_whatsapp: '',
             mensagem_email_assunto: '',
