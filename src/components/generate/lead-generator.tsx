@@ -774,21 +774,52 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
               </div>
             </div>
 
-            {/* Right: validações & rating */}
+            {/* Right: dados informados (não verificados) + rating */}
             <div className="col-span-4 space-y-4">
+              {/* Disclaimer: dados gerados por IA */}
+              <div
+                className="flex items-start gap-2 rounded-lg p-3 text-xs"
+                style={{
+                  backgroundColor: 'color-mix(in oklab, #F59E0B 8%, var(--surface-2))',
+                  border: '1px solid color-mix(in oklab, #F59E0B 30%, var(--border))',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
+                <span>
+                  Dados gerados por IA a partir do nome/CNPJ informado.{' '}
+                  <strong>Valide manualmente antes de disparar mensagens</strong> — nenhum dado foi
+                  conferido em Receita, Google Maps, LinkedIn ou operadora.
+                </span>
+              </div>
+
               <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>VALIDAÇÕES</p>
+                <p className="text-xs font-semibold tracking-wide mb-3" style={{ color: 'var(--text-tertiary)' }}>
+                  DADOS INFORMADOS · NÃO VERIFICADOS
+                </p>
                 <div className="space-y-2.5">
                   {[
-                    { ok: lead.cnpj_ativo, label: 'CNPJ ativo na Receita' },
-                    { ok: lead.rating_maps > 0, label: `Presente no Google Maps${lead.rating_maps > 0 ? ` (${lead.rating_maps.toFixed(1)}★)` : ''}` },
-                    { ok: !!lead.email && lead.email.length > 0, label: 'E-mail validado' },
-                    { ok: !!lead.linkedin_url, label: 'LinkedIn encontrado' },
-                    { ok: !!lead.whatsapp, label: 'WhatsApp disponível' },
+                    { filled: !!lead.cnpj && lead.cnpj.length > 0, label: 'CNPJ informado', hint: 'não conferido na Receita' },
+                    { filled: lead.rating_maps > 0, label: lead.rating_maps > 0 ? `Rating Maps: ${lead.rating_maps.toFixed(1)}★` : 'Rating Maps', hint: 'valor informado pela IA' },
+                    { filled: !!lead.email && lead.email.length > 0, label: 'E-mail informado', hint: 'MX/SMTP não verificado' },
+                    { filled: !!lead.linkedin_url, label: 'LinkedIn (URL de busca)', hint: 'perfil não verificado' },
+                    { filled: !!lead.whatsapp, label: 'WhatsApp informado', hint: 'não conferido na operadora' },
                   ].map((v, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs">
-                      {v.ok ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--primary)' }} /> : <Circle className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--text-disabled)' }} />}
-                      <span style={{ color: v.ok ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>{v.label}</span>
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      {v.filled ? (
+                        <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
+                      ) : (
+                        <Circle className="h-3.5 w-3.5 shrink-0 mt-0.5" style={{ color: 'var(--text-disabled)' }} />
+                      )}
+                      <div className="flex-1">
+                        <div style={{ color: v.filled ? 'var(--text-primary)' : 'var(--text-tertiary)' }}>
+                          {v.label}
+                          {!v.filled && <span style={{ color: 'var(--text-tertiary)' }}> — vazio</span>}
+                        </div>
+                        {v.filled && (
+                          <div className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>{v.hint}</div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1296,6 +1327,9 @@ export function LeadGenerator() {
   // the search form has a totally different shape (single input, no filters).
   const [mode, setMode] = useState<'discover' | 'search'>('discover')
   const [empresaBusca, setEmpresaBusca] = useState('')
+  // Inline state for when the LLM returns not_found — we show a friendly card
+  // below the form instead of just a transient toast.
+  const [searchNotFound, setSearchNotFound] = useState<{ reason: string; hint: string } | null>(null)
   const [importResult, setImportResult] = useState<
     | { type: 'success'; imported: number; skipped: number }
     | { type: 'error'; message: string }
@@ -1506,6 +1540,7 @@ export function LeadGenerator() {
     setLogs([])
     setStats({})
     setRequestedQty(1)
+    setSearchNotFound(null)
 
     try {
       const res = await fetch('/api/generate-leads', {
@@ -1545,7 +1580,21 @@ export function LeadGenerator() {
             setStats(data.stats ?? {})
             setProgress(100)
           } else if (data.type === 'error') {
-            toast.error(data.message || 'Erro ao pesquisar empresa')
+            // Distinguish "empresa não encontrada" (friendly inline card) from
+            // generic errors (toast). not_found is an expected outcome now that
+            // we stopped fabricating data when the LLM has no confidence.
+            if (data.reason === 'not_found') {
+              // data.message shape is `${reason} ${suggestion}` — split best-effort.
+              const full = (data.message || 'Empresa não localizada.') as string
+              const parts = full.split('.')
+              const reason = (parts[0] ?? full).trim() + '.'
+              const hint = parts.slice(1).join('.').trim() || 'Tente o CNPJ completo, ou o nome + cidade/UF.'
+              setSearchNotFound({ reason, hint })
+              setPipeline(INITIAL_PIPELINE)
+              setProgress(0)
+            } else {
+              toast.error(data.message || 'Erro ao pesquisar empresa')
+            }
           }
         }
       }
@@ -1635,13 +1684,17 @@ export function LeadGenerator() {
               </label>
               <Input
                 value={empresaBusca}
-                onChange={(e) => setEmpresaBusca(e.target.value)}
-                placeholder="Ex: Sankhya Gestão de Negócios ou 03.571.875/0001-00"
+                onChange={(e) => {
+                  setEmpresaBusca(e.target.value)
+                  if (searchNotFound) setSearchNotFound(null)
+                }}
+                placeholder="Ex: Sankhya São Paulo ou 03.571.875/0001-00"
                 disabled={isGenerating}
                 autoFocus
               />
               <p className="mt-1 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-                Dica: CNPJ resolve direto; pelo nome a IA deduz o mais provável.
+                Dica: para empresas menos conhecidas, inclua cidade/UF ou o CNPJ completo.
+                Se a IA não tiver dados confiáveis, vai dizer &ldquo;não encontrada&rdquo; em vez de inventar.
               </p>
             </div>
             <Button
@@ -1664,6 +1717,33 @@ export function LeadGenerator() {
               )}
             </Button>
           </form>
+
+          {/* Not-found inline card — shows when the LLM couldn't find reliable
+              data and refused to fabricate. Explicitly friendly so the user
+              understands why they got no result. */}
+          {searchNotFound && !isGenerating && (
+            <div
+              className="mt-4 flex items-start gap-3 rounded-lg p-4"
+              style={{
+                backgroundColor: 'color-mix(in oklab, #F59E0B 8%, var(--surface-1))',
+                border: '1px solid color-mix(in oklab, #F59E0B 35%, var(--border))',
+              }}
+            >
+              <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" style={{ color: '#B45309' }} />
+              <div className="flex-1">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                  Empresa não encontrada com dados confiáveis
+                </p>
+                <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {searchNotFound.reason} {searchNotFound.hint}
+                </p>
+                <p className="mt-2 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+                  Preferimos dizer &ldquo;não encontrada&rdquo; a inventar CNPJ, telefone ou decisor —
+                  dados fabricados viram risco jurídico e queimam sua lista.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

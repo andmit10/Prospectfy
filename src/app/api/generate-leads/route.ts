@@ -131,6 +131,118 @@ function sendEvent(
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
 }
 
+// ─── Anti-fabrication guardrails ────────────────────────────────────────────
+// These strip values the LLM made up (CNPJ placeholders, sequential phones)
+// even when the prompt explicitly forbids them — models occasionally slip.
+
+// Well-known synthetic CNPJs used in tutorials/placeholders. The "12.345.678"
+// pattern in particular is associated with fraud reports (see advisory on
+// Facebook 2025).
+const SYNTHETIC_CNPJ_PATTERNS: RegExp[] = [
+  /^12[.\-/]?345[.\-/]?678/,
+  /^0{2}[.\-/]?0{3}[.\-/]?0{3}/,
+  /^1{2}[.\-/]?1{3}[.\-/]?1{3}/,
+  /^2{2}[.\-/]?2{3}[.\-/]?2{3}/,
+  /^3{2}[.\-/]?3{3}[.\-/]?3{3}/,
+  /^4{2}[.\-/]?4{3}[.\-/]?4{3}/,
+  /^5{2}[.\-/]?5{3}[.\-/]?5{3}/,
+  /^6{2}[.\-/]?6{3}[.\-/]?6{3}/,
+  /^7{2}[.\-/]?7{3}[.\-/]?7{3}/,
+  /^8{2}[.\-/]?8{3}[.\-/]?8{3}/,
+  /^9{2}[.\-/]?9{3}[.\-/]?9{3}/,
+]
+
+function isSyntheticCnpj(cnpj: string): boolean {
+  if (!cnpj) return false
+  return SYNTHETIC_CNPJ_PATTERNS.some((p) => p.test(cnpj))
+}
+
+// Modulo-11 CNPJ check digit validation. Returns true when the 14 digits
+// form a mathematically valid CNPJ (doesn't prove it exists on Receita, but
+// filters out random 14-digit numbers).
+function hasValidCnpjCheckDigits(cnpj: string): boolean {
+  const d = cnpj.replace(/\D/g, '')
+  if (d.length !== 14) return false
+  if (/^(\d)\1+$/.test(d)) return false
+  const calc = (slice: string, weights: number[]) => {
+    const sum = slice.split('').reduce((acc, ch, i) => acc + Number(ch) * weights[i], 0)
+    const rest = sum % 11
+    return rest < 2 ? 0 : 11 - rest
+  }
+  const w1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+  const w2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+  const dv1 = calc(d.slice(0, 12), w1)
+  const dv2 = calc(d.slice(0, 12) + String(dv1), w2)
+  return Number(d[12]) === dv1 && Number(d[13]) === dv2
+}
+
+// Classic tutorial/fake phone patterns. Any phone matching these is dropped.
+const SYNTHETIC_PHONE_PATTERNS: RegExp[] = [
+  /3000[-\s]?0001/,
+  /2000[-\s]?0001/,
+  /1234[-\s]?5678/,
+  /5555[-\s]?5555/,
+  /9999[-\s]?0001/,
+  /9999[-\s]?0002/,
+  /9999[-\s]?0003/,
+  /1111[-\s]?1111/,
+  /0000[-\s]?0000/,
+  /99999[-]?0001$/,
+  /99999[-]?0002$/,
+  /99999[-]?0003$/,
+]
+
+function isSyntheticPhone(phone: string): boolean {
+  if (!phone) return false
+  return SYNTHETIC_PHONE_PATTERNS.some((p) => p.test(phone))
+}
+
+type SanitizeFlags = {
+  cnpjStripped: boolean
+  telefoneStripped: boolean
+  whatsappStripped: boolean
+}
+
+function sanitizeLead<L extends z.infer<typeof leadSchema>>(lead: L): { lead: L; flags: SanitizeFlags } {
+  const flags: SanitizeFlags = { cnpjStripped: false, telefoneStripped: false, whatsappStripped: false }
+  const out: L = { ...lead }
+
+  // CNPJ: strip if synthetic or digit-invalid. cnpj_ativo can only be true
+  // when we have a digit-valid non-synthetic CNPJ.
+  if (out.cnpj) {
+    if (isSyntheticCnpj(out.cnpj) || !hasValidCnpjCheckDigits(out.cnpj)) {
+      out.cnpj = ''
+      out.cnpj_ativo = false
+      flags.cnpjStripped = true
+    }
+  } else {
+    out.cnpj_ativo = false
+  }
+
+  // Telefone fixo: strip if matches synthetic patterns.
+  if (out.telefone && isSyntheticPhone(out.telefone)) {
+    out.telefone = ''
+    flags.telefoneStripped = true
+  }
+
+  // WhatsApp: strip if matches synthetic patterns. Downstream will see empty
+  // string and the UI will mark as não-verificado.
+  if (out.whatsapp && isSyntheticPhone(out.whatsapp)) {
+    out.whatsapp = ''
+    flags.whatsappStripped = true
+  }
+
+  // Decisores array — same treatment per-row.
+  if (Array.isArray(out.decisores) && out.decisores.length > 0) {
+    out.decisores = out.decisores.map((d) => ({
+      ...d,
+      whatsapp: d.whatsapp && isSyntheticPhone(d.whatsapp) ? '' : d.whatsapp,
+    })) as L['decisores']
+  }
+
+  return { lead: out, flags }
+}
+
 export async function POST(request: NextRequest) {
   // Rate limits run before we start streaming so the 429 can use a normal JSON
   // response. Claude calls are expensive — 6/min is generous for a real user
@@ -321,45 +433,45 @@ PARÂMETROS:
 - Região: ${regiao}
 - Cargo alvo do decisor: ${cargo}${filterBlock}${excludeBlock}
 
-RETORNE APENAS um array JSON puro (sem \`\`\`json nem texto adicional). Cada lead DEVE ter TODOS estes campos:
+RETORNE APENAS um array JSON puro (sem \`\`\`json nem texto adicional). Cada lead DEVE ter TODOS estes campos (os valores abaixo são apenas DESCRIÇÕES do formato — NÃO copie literalmente):
 [{
-  "empresa_nome": "Nome Real da Empresa Ltda",
-  "decisor_nome": "Nome Completo Real",
+  "empresa_nome": "<nome real da empresa brasileira, com sufixo Ltda/S.A./ME quando aplicável>",
+  "decisor_nome": "<nome completo do decisor principal>",
   "decisor_cargo": "${cargos_alvo?.[0] || cargo_alvo || 'Diretor'}",
   "decisores": [
     {
-      "nome": "Nome do decisor principal",
+      "nome": "<nome do decisor principal>",
       "cargo": "${cargos_alvo?.[0] || cargo_alvo || 'Diretor'}",
-      "email": "nome@empresa.com.br",
-      "whatsapp": "5531999990001",
-      "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Nome+Sobrenome+Empresa",
+      "email": "<email corporativo no domínio da empresa, ou null se não souber>",
+      "whatsapp": "<55 + DDD da região + 9 dígitos iniciando com 9, ou null se não souber — NUNCA use padrões sequenciais tipo 999990001>",
+      "linkedin_url": "<URL de busca do LinkedIn no formato https://www.linkedin.com/search/results/people/?keywords=...>",
       "principal": true
     },
     {
-      "nome": "Nome de um sócio ou diretor secundário",
-      "cargo": "Sócio / Diretor Comercial / Diretor Financeiro",
-      "email": "nome2@empresa.com.br",
-      "whatsapp": "5531999990002",
-      "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Nome2+Empresa",
+      "nome": "<nome de sócio ou diretor secundário>",
+      "cargo": "<Sócio / Diretor Comercial / Diretor Financeiro>",
+      "email": "<email ou null>",
+      "whatsapp": "<whatsapp ou null>",
+      "linkedin_url": "<URL de busca>",
       "principal": false
     }
   ],
   "segmento": "${segmento}",
   "cidade": "${cidade || 'São Paulo'}",
   "estado": "${estado || 'SP'}",
-  "email": "nome@empresa.com.br",
-  "whatsapp": "5531999990001",
-  "telefone": "(31) 3000-0001",
-  "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Nome+Sobrenome+Empresa",
-  "cnpj": "12.345.678/0001-90",
-  "cnpj_ativo": true,
-  "website": "https://www.empresa.com.br",
-  "rating_maps": 4.5,
-  "total_avaliacoes": 127,
-  "porte": "ME",
-  "funcionarios_estimados": 15,
-  "razao_social": "EMPRESA LTDA",
-  "nome_fantasia": "Empresa",
+  "email": "<email corporativo do decisor principal no domínio real da empresa, ou null>",
+  "whatsapp": "<whatsapp do decisor principal — NUNCA use padrões sequenciais fake>",
+  "telefone": "<telefone fixo real da empresa no formato (DD) XXXX-XXXX, ou null se não souber — NUNCA use 3000-0001 ou padrões sequenciais>",
+  "linkedin_url": "<URL de busca do LinkedIn da empresa ou decisor>",
+  "cnpj": "<CNPJ real e plausível no formato XX.XXX.XXX/0001-XX com dígitos verificadores corretos, ou null se não souber — NUNCA use 12.345.678/0001-90 nem sequências como 00.000.000, 11.111.111, etc.>",
+  "cnpj_ativo": "<true SOMENTE se tiver razão plausível pra acreditar que o CNPJ está ativo na Receita; caso contrário false>",
+  "website": "<domínio institucional real da empresa, ou null se não souber>",
+  "rating_maps": "<nota Google Maps de 1.0 a 5.0 se conhecida; 0 se desconhecida/sem perfil>",
+  "total_avaliacoes": "<número real de avaliações, ou 0 se desconhecido>",
+  "porte": "<MEI | ME | EPP | Média | Grande>",
+  "funcionarios_estimados": "<número compatível com porte>",
+  "razao_social": "<razão social completa em CAIXA ALTA>",
+  "nome_fantasia": "<nome comercial>",
   "score": 78,
   "score_detalhes": {
     "maps_presenca": 20,
@@ -380,77 +492,115 @@ REGRAS OBRIGATÓRIAS:
 - Decisores com nomes brasileiros completos e cargos reais
 - decisores: array com 2-4 decisores por empresa (1 principal + sócios/diretores secundários). O primeiro deve ter principal: true e bater com decisor_nome do nível superior.
 - linkedin_url SEMPRE em formato de BUSCA (https://www.linkedin.com/search/results/people/?keywords=...). NUNCA gere URLs do tipo /in/<slug> porque você não tem como verificar se existem.
-- WhatsApp: 55 + DDD da região + 9 dígitos (13 dígitos total)
-- CNPJ: formato XX.XXX.XXX/0001-XX com dígitos plausíveis
-- rating_maps: nota de 1.0 a 5.0 (com 1 casa decimal)
-- total_avaliacoes: número entre 5 e 500
+
+POLÍTICA ANTI-FABRICAÇÃO (crítica — o produto pode ser responsabilizado legalmente se você inventar):
+- Se você NÃO souber um valor real para um campo, RETORNE null. NUNCA invente.
+- É PROIBIDO usar valores sintéticos/sequenciais clássicos:
+  - CNPJ: NÃO use 12.345.678/0001-90, 00.000.000/0001-00, 11.111.111/0001-11, 99.999.999/0001-99, ou qualquer sequência obviamente sintética.
+  - Telefone fixo: NÃO use padrões como (DD) 3000-0001, (DD) 2000-0001, (DD) 1234-5678.
+  - WhatsApp: NÃO use padrões como 55DD999990001, 55DD999990002, 55DD911111111, 55DD900000000 ou sequências similares.
+- Se não tiver CNPJ real e plausível da empresa: retorne cnpj: null e cnpj_ativo: false.
+- Se não tiver telefone/whatsapp real: retorne null nesse campo — o lead pode ser usado mesmo sem esses dados.
+- cnpj_ativo deve ser true SOMENTE quando você tem razão concreta pra acreditar que o CNPJ gerado existe e está ativo. Em caso de dúvida, false.
+
+FORMATOS (quando o valor NÃO for null):
+- WhatsApp: 55 + DDD da região + 9 dígitos (13 dígitos total), dígitos não-sequenciais e plausíveis.
+- CNPJ: formato XX.XXX.XXX/0001-XX com dígitos verificadores corretos (use o algoritmo do módulo 11 do CNPJ). Se não conseguir gerar um válido, retorne null.
+- rating_maps: nota de 1.0 a 5.0 (com 1 casa decimal) APENAS se você souber que a empresa tem perfil no Maps; caso contrário 0.
+- total_avaliacoes: número real se conhecido, ou 0.
 - porte: um de "MEI", "ME", "EPP", "Média", "Grande"
 - funcionarios_estimados: número compatível com o porte
-- website: domínio institucional plausível da empresa. Use variações do nome real. NUNCA repita o exemplo — gere domínios realistas. Se a empresa for muito pequena, pode ser null.
+- website: domínio institucional plausível da empresa. Use variações do nome real. Se a empresa for muito pequena ou desconhecida, retorne null.
 - razao_social: nome jurídico completo em CAIXA ALTA terminando em LTDA/S.A./EIRELI/ME
 - nome_fantasia: nome comercial curto (sem o sufixo jurídico)
+
+CAMPOS COMERCIAIS (sempre preenchidos, baseados no que você sabe do segmento):
 - score: 0-100, soma dos score_detalhes
 - justificativa_score: 1-2 frases concretas explicando POR QUE esse lead é quente. Cite dados específicos (porte, presença online, cargo). NÃO seja genérico.
 - horario_ideal: 1 frase com dia e janela de horário recomendada para o primeiro contato.
 - mensagem_whatsapp: 2-3 parágrafos curtos, tom profissional mas casual (WhatsApp brasileiro). Use [Nome] e [Empresa Usuário] como placeholders. Termina com CTA pra reunião de 15min.
 - mensagem_email_assunto: curto, direto, instigante.
 - mensagem_email_corpo: 3 parágrafos. Use \\n para quebras. Use [Nome], [Empresa], [Seu Nome] como placeholders.
+
+OUTROS:
 - Todos os ${batchSize} leads DIFERENTES entre si
-- E-mails com domínio da empresa (.com.br ou .com)
+- E-mails com domínio da empresa (.com.br ou .com) quando souber
 - NÃO use nomes genéricos — seja específico e realista
 - RESPONDA APENAS COM O ARRAY JSON — NENHUM TEXTO ANTES OU DEPOIS`
         }
 
         // Search-mode prompt: enrich a single company by name or CNPJ.
-        // Returns a single-item array to keep the parsing path identical to
-        // discover-mode (downstream code treats everything as an array).
+        // Returns either a single-item array OR a not_found sentinel object.
         function buildSearchPrompt(): string {
           const query = (empresa_busca ?? '').trim()
           const looksLikeCnpj = /\d{2}[.\-\/]?\d{3}[.\-\/]?\d{3}[.\-\/]?\d{4}[.\-\/]?\d{2}/.test(query)
-          return `Você é um sistema avançado de enriquecimento de empresas B2B brasileiras.
-Retorne os dados da empresa "${query}" em formato de lead enriquecido.
-${looksLikeCnpj ? 'A query é um CNPJ — use exatamente esse CNPJ e deduza o resto.' : 'A query é um nome — deduza o CNPJ mais plausível e os demais dados.'}
+          return `Você é um sistema de enriquecimento de empresas B2B brasileiras.
+A query do usuário é: "${query}".
+${looksLikeCnpj ? 'A query parece um CNPJ.' : 'A query é um nome de empresa.'}
 
-Se você NÃO tiver dados confiáveis sobre essa empresa específica, ainda assim retorne um
-lead com os dados mais prováveis baseados no nome/CNPJ. Use o nome como razão social
-formal e deduza nome_fantasia, segmento, porte e decisores típicos do setor.
+POLÍTICA CRÍTICA — LEIA COM ATENÇÃO:
+Este é um sistema de prospecção real. O cliente vai DISPARAR mensagens de WhatsApp para os
+dados que você retornar. Se você inventar CNPJ, telefone, email ou nome de decisor, o cliente
+pode acabar mandando mensagem pra uma pessoa aleatória (uso indevido de dados, LGPD, ação civil).
 
-RETORNE APENAS um array JSON com EXATAMENTE 1 item no mesmo formato da geração normal:
+POR ISSO, É PROIBIDO INVENTAR DADOS.
+
+DECISÃO:
+
+OPÇÃO A — se você tem CERTEZA razoável de que conhece essa empresa específica (é uma
+empresa grande/pública/notória que aparece em notícias, redes sociais, Receita Federal, ou
+você conhece dados reais sobre ela):
+  → retorne um array JSON com 1 item no formato abaixo, preenchendo APENAS os campos que
+    você sabe com certeza. Campos desconhecidos devem ser null.
+
+OPÇÃO B — se você NÃO conhece essa empresa específica (é nome pequeno, genérico, ambíguo,
+desconhecido, ou você tá prestes a inventar CNPJ/telefone/email):
+  → retorne EXATAMENTE este objeto (não array):
+    {
+      "status": "not_found",
+      "reason": "Empresa '${query}' não foi localizada com dados confiáveis.",
+      "suggestion": "<mensagem de 1 frase pro usuário sugerindo o que fornecer: CNPJ completo, ou nome + cidade/UF, ou nome mais específico>"
+    }
+
+  Exemplos de quando retornar not_found:
+  - Nome curto ou genérico (ex: "awl", "locações", "ABC") sem cidade/UF
+  - Empresa pequena/local que você não tem certeza que existe
+  - Você só consegue deduzir os dados a partir do setor, não a partir da empresa em si
+  - Você teria que inventar o CNPJ pra completar os campos
+
+OPÇÃO A — formato (apenas se aplicável):
 [{
-  "empresa_nome": "Nome da empresa",
-  "decisor_nome": "Nome do decisor principal",
-  "decisor_cargo": "Cargo (CEO, Diretor, Sócio, etc.)",
+  "empresa_nome": "<nome real>",
+  "decisor_nome": "<nome real ou null>",
+  "decisor_cargo": "<cargo real ou null>",
   "decisores": [
-    { "nome": "...", "cargo": "...", "email": "...", "whatsapp": "...", "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=...", "principal": true },
-    { "nome": "...", "cargo": "...", "email": "...", "whatsapp": "...", "linkedin_url": "...", "principal": false }
+    { "nome": "<nome real>", "cargo": "<cargo>", "email": "<email real ou null>", "whatsapp": "<whatsapp real ou null>", "linkedin_url": "<URL de busca>", "principal": true }
   ],
-  "segmento": "Segmento da empresa",
-  "cidade": "Cidade", "estado": "UF",
-  "email": "contato@empresa.com.br",
-  "whatsapp": "5531999990001",
-  "telefone": "(31) 3000-0001",
-  "linkedin_url": "https://www.linkedin.com/search/results/people/?keywords=Empresa",
-  "cnpj": "XX.XXX.XXX/0001-XX",
-  "cnpj_ativo": true,
-  "website": "https://www.empresa.com.br",
-  "rating_maps": 4.5, "total_avaliacoes": 127,
-  "porte": "ME", "funcionarios_estimados": 15,
-  "razao_social": "EMPRESA LTDA", "nome_fantasia": "Empresa",
-  "score": 78,
-  "score_detalhes": { "maps_presenca": 20, "decisor_encontrado": 25, "email_validado": 15, "linkedin_ativo": 20, "porte_match": 10 },
-  "justificativa_score": "Por que essa empresa é um alvo quente (1-2 frases concretas).",
-  "horario_ideal": "Dia + janela de horário recomendada para o primeiro contato.",
-  "mensagem_whatsapp": "WhatsApp pronto com [Nome], [Empresa Usuário] como placeholders, CTA para reunião de 15min.",
-  "mensagem_email_assunto": "Assunto curto e instigante",
-  "mensagem_email_corpo": "Email em 3 parágrafos usando placeholders [Nome], [Empresa], [Seu Nome]."
+  "segmento": "<segmento real>",
+  "cidade": "<cidade ou null>", "estado": "<UF ou null>",
+  "email": "<email real ou null>",
+  "whatsapp": "<whatsapp real ou null — NUNCA inventar>",
+  "telefone": "<telefone real ou null — NUNCA inventar, PROIBIDO usar padrões 3000-0001>",
+  "linkedin_url": "<URL de busca no LinkedIn>",
+  "cnpj": "<CNPJ real com dígitos verificadores corretos, ou null — PROIBIDO usar 12.345.678/0001-90 ou sequências sintéticas>",
+  "cnpj_ativo": "<true apenas se souber com certeza>",
+  "website": "<domínio real ou null>",
+  "rating_maps": "<nota real ou 0>", "total_avaliacoes": "<número real ou 0>",
+  "porte": "<MEI|ME|EPP|Média|Grande>", "funcionarios_estimados": "<número ou null>",
+  "razao_social": "<razão social real ou null>", "nome_fantasia": "<nome fantasia ou null>",
+  "score": "<0-100>",
+  "score_detalhes": { "maps_presenca": 0, "decisor_encontrado": 0, "email_validado": 0, "linkedin_ativo": 0, "porte_match": 0 },
+  "justificativa_score": "<1-2 frases concretas; se a maioria dos campos foi null, explique que os dados precisam ser validados manualmente>",
+  "horario_ideal": "<dia + janela>",
+  "mensagem_whatsapp": "<mensagem com [Nome], [Empresa Usuário], CTA reunião 15min>",
+  "mensagem_email_assunto": "<assunto curto>",
+  "mensagem_email_corpo": "<3 parágrafos com [Nome], [Empresa], [Seu Nome]>"
 }]
 
-REGRAS:
+REGRAS FINAIS:
 - linkedin_url SEMPRE em formato de busca. NUNCA invente /in/<slug>.
-- 2-4 decisores por empresa.
-- Se a empresa é conhecida (grande ou pública), use dados reais. Se desconhecida,
-  dedução baseada no setor + porte é aceitável — sinalize na justificativa_score.
-- RESPONDA APENAS COM O ARRAY JSON.`
+- Se retornar null em cnpj/telefone/whatsapp/email, a UI vai mostrar como "não verificado" — melhor null do que fake.
+- NÃO inclua markdown, \`\`\`json ou comentários — apenas o JSON puro (array OU objeto not_found).`
         }
 
         // Step 2: Decisor
@@ -491,33 +641,76 @@ REGRAS:
         // asks for a JSON array, and we let the Gateway's extractJson handle
         // markdown fences / partial content. Telemetry (modelId, latency,
         // cost) is recorded per batch by the Gateway.
-        const batchResults = await Promise.all(
-          batches.map(async (batchSize) => {
+        // Search mode can also return a {status:"not_found"} sentinel object,
+        // so we accept either shape and normalize below.
+        type BatchOutput =
+          | { kind: 'array'; items: unknown[] }
+          | { kind: 'not_found'; reason: string; suggestion: string }
+
+        const batchResults: BatchOutput[] = await Promise.all(
+          batches.map(async (batchSize): Promise<BatchOutput> => {
             // ~900 tokens/lead now (was ~400) due to decisores + enrichment.
             const maxTokens = Math.min(16000, Math.max(4096, batchSize * 900))
             try {
               const result = await llm.extract<unknown>({
                 user: isSearch ? buildSearchPrompt() : buildPrompt(batchSize),
-                // We accept any JSON shape — the batched prompt returns a raw
-                // array. extractJson handles markdown fences + partial JSON.
-                schema: { type: 'array' },
+                // Permissive — may be array (leads) or object (not_found
+                // sentinel in search mode).
+                schema: {},
                 maxTokens,
                 orgId,
                 userId: user.id,
               })
-              // `result.data` is whatever extractJson produced; fall back to
-              // parsing the raw content when needed.
-              if (Array.isArray(result.data)) return result.data as unknown[]
-              const parsed = extractJson(String(result.data ?? ''))
-              return Array.isArray(parsed) ? parsed : []
+              // `result.data` is whatever extractJson produced; may already be
+              // parsed or may be a string we still need to extract JSON from.
+              const raw: unknown = Array.isArray(result.data) || (result.data && typeof result.data === 'object')
+                ? result.data
+                : extractJson(String(result.data ?? ''))
+
+              // Not-found sentinel (search mode) — {status:"not_found",...}
+              if (
+                raw !== null &&
+                typeof raw === 'object' &&
+                !Array.isArray(raw) &&
+                (raw as { status?: unknown }).status === 'not_found'
+              ) {
+                const obj = raw as { reason?: string; suggestion?: string }
+                return {
+                  kind: 'not_found',
+                  reason: obj.reason || 'Empresa não localizada com dados confiáveis.',
+                  suggestion: obj.suggestion || 'Tente o CNPJ completo ou o nome + cidade/UF.',
+                }
+              }
+
+              return { kind: 'array', items: Array.isArray(raw) ? raw : [] }
             } catch (err) {
               console.error('[generate-leads] batch error:', err)
-              return []
+              return { kind: 'array', items: [] }
             }
           })
         )
 
-        const combined = batchResults.flat()
+        // Search mode: honor not_found before running the rest of the pipeline.
+        if (isSearch) {
+          const nf = batchResults.find((b): b is Extract<BatchOutput, { kind: 'not_found' }> => b.kind === 'not_found')
+          if (nf) {
+            sendEvent(controller, encoder, {
+              type: 'progress',
+              step: 'maps',
+              status: 'done',
+              message: nf.reason,
+            })
+            sendEvent(controller, encoder, {
+              type: 'error',
+              reason: 'not_found',
+              message: `${nf.reason} ${nf.suggestion}`,
+            })
+            controller.close()
+            return
+          }
+        }
+
+        const combined = batchResults.flatMap((b) => (b.kind === 'array' ? b.items : []))
 
         // Step 3: LinkedIn
         sendEvent(controller, encoder, {
@@ -541,23 +734,31 @@ REGRAS:
 
         // Validate leniently: drop only malformed leads, keep valid ones.
         // Also filter out any duplicates that Claude generated despite the exclude list.
+        // Each passing lead is sanitized — synthetic CNPJs/phones get stripped
+        // here even if the prompt guardrails didn't catch them.
         const validLeads: z.infer<typeof leadSchema>[] = []
         const seenWhatsapp = new Set<string>()
         const seenCompany = new Set<string>()
         let dedupSkipped = 0
+        let cnpjStrippedCount = 0
+        let phoneStrippedCount = 0
         for (const item of combined) {
           const ok = leadSchema.safeParse(item)
           if (!ok.success) continue
-          const lead = ok.data
+          const { lead, flags } = sanitizeLead(ok.data)
+          if (flags.cnpjStripped) cnpjStrippedCount++
+          if (flags.telefoneStripped || flags.whatsappStripped) phoneStrippedCount++
+
           const companyKey = lead.empresa_nome.trim().toLowerCase()
 
-          // Skip if already in user's DB (by whatsapp or CNPJ) or duplicated within batch
-          if (existingWhatsapps.has(lead.whatsapp)) { dedupSkipped++; continue }
+          // Skip if already in user's DB (by whatsapp or CNPJ) or duplicated within batch.
+          // Empty whatsapp after sanitization is still allowed — UI marks it as não-verificado.
+          if (lead.whatsapp && existingWhatsapps.has(lead.whatsapp)) { dedupSkipped++; continue }
           if (lead.cnpj && existingCnpjs.has(lead.cnpj)) { dedupSkipped++; continue }
-          if (seenWhatsapp.has(lead.whatsapp)) { dedupSkipped++; continue }
+          if (lead.whatsapp && seenWhatsapp.has(lead.whatsapp)) { dedupSkipped++; continue }
           if (seenCompany.has(companyKey)) { dedupSkipped++; continue }
 
-          seenWhatsapp.add(lead.whatsapp)
+          if (lead.whatsapp) seenWhatsapp.add(lead.whatsapp)
           seenCompany.add(companyKey)
           validLeads.push(lead)
         }
@@ -567,6 +768,20 @@ REGRAS:
             type: 'log',
             level: 'info',
             message: `${dedupSkipped} leads duplicados foram descartados automaticamente`,
+          })
+        }
+        if (cnpjStrippedCount > 0) {
+          sendEvent(controller, encoder, {
+            type: 'log',
+            level: 'warn',
+            message: `${cnpjStrippedCount} CNPJ(s) sintético(s) ou inválido(s) foram removidos — valide manualmente.`,
+          })
+        }
+        if (phoneStrippedCount > 0) {
+          sendEvent(controller, encoder, {
+            type: 'log',
+            level: 'warn',
+            message: `${phoneStrippedCount} telefone(s) com padrão fake foram removidos.`,
           })
         }
 
