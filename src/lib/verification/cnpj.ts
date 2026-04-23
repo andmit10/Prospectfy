@@ -130,18 +130,39 @@ export async function verifyCnpj(
 
   // ── Attempt 1: BrasilAPI ────────────────────────────────────────────────
   const brasilApiResult = await tryBrasilApi(normalized, { timeoutMs, signal })
-  if (brasilApiResult.kind === 'ok') return brasilApiResult.data
+
   if (brasilApiResult.kind === 'not_found') {
     return { verified: false, reason: 'not_found', cnpj_input: input }
   }
-  // Anything else (rate_limited, network_error, 5xx) → fall through to ReceitaWS
 
+  if (brasilApiResult.kind === 'ok') {
+    // BrasilAPI worked. Check if it returned sparse data — if email/telefone
+    // are empty, ReceitaWS often has them (different cache vintage at Receita).
+    // Enrich on-demand instead of always double-calling (saves ReceitaWS
+    // rate-limit budget).
+    const sparse =
+      !brasilApiResult.data.email &&
+      !brasilApiResult.data.telefone &&
+      brasilApiResult.data.socios.length === 0
+
+    if (sparse) {
+      log.warn('cnpj brasilapi sparse, enriching with receitaws', { cnpj: normalized })
+      const enrichResult = await tryReceitaWs(normalized, { timeoutMs, signal })
+      if (enrichResult.kind === 'ok') {
+        return mergeEnrichment(brasilApiResult.data, enrichResult.data)
+      }
+      // Enrichment failed — that's ok, return BrasilAPI data alone.
+    }
+
+    return brasilApiResult.data
+  }
+
+  // BrasilAPI errored (not 404) — try ReceitaWS as full fallback.
   log.warn('cnpj brasilapi failed, trying receitaws', {
     cnpj: normalized,
     reason: brasilApiResult.reason,
   })
 
-  // ── Attempt 2: ReceitaWS ────────────────────────────────────────────────
   const receitaWsResult = await tryReceitaWs(normalized, { timeoutMs, signal })
   if (receitaWsResult.kind === 'ok') return receitaWsResult.data
   if (receitaWsResult.kind === 'not_found') {
@@ -154,13 +175,51 @@ export async function verifyCnpj(
     receitaws: receitaWsResult.reason,
   })
 
-  // Both failed — prefer BrasilAPI's error semantics (it's our primary).
   return {
     verified: false,
     reason: brasilApiResult.reason === 'rate_limited' ? 'rate_limited' : 'network_error',
     cnpj_input: input,
     message: `BrasilAPI ${brasilApiResult.detail ?? '?'} + ReceitaWS ${receitaWsResult.detail ?? '?'}`,
   }
+}
+
+/**
+ * Fill in empty fields on BrasilAPI result using ReceitaWS data.
+ * BrasilAPI is the primary source (identity fields always come from it).
+ * ReceitaWS complements with contact info (email/telefone) and QSA when
+ * BrasilAPI's cache lags behind.
+ */
+function mergeEnrichment(primary: CnpjVerified, enrichment: CnpjVerified): CnpjVerified {
+  const merged: CnpjVerified = { ...primary }
+
+  // Contact info — prefer primary, fall back to enrichment.
+  if (!merged.email && enrichment.email) merged.email = enrichment.email
+  if (!merged.telefone && enrichment.telefone) {
+    merged.telefone = enrichment.telefone
+    merged.telefone_mobile = enrichment.telefone_mobile
+  }
+
+  // Address details — fill gaps.
+  if (!merged.logradouro && enrichment.logradouro) merged.logradouro = enrichment.logradouro
+  if (!merged.numero && enrichment.numero) merged.numero = enrichment.numero
+  if (!merged.complemento && enrichment.complemento) merged.complemento = enrichment.complemento
+  if (!merged.bairro && enrichment.bairro) merged.bairro = enrichment.bairro
+  if (!merged.cep && enrichment.cep) merged.cep = enrichment.cep
+
+  // QSA — BrasilAPI's empty array + ReceitaWS has socios means we trust enrichment.
+  if (merged.socios.length === 0 && enrichment.socios.length > 0) {
+    merged.socios = enrichment.socios
+  }
+
+  // Capital social + abertura — fill if primary missing.
+  if (merged.capital_social === null && enrichment.capital_social !== null) {
+    merged.capital_social = enrichment.capital_social
+  }
+  if (!merged.data_inicio_atividade && enrichment.data_inicio_atividade) {
+    merged.data_inicio_atividade = enrichment.data_inicio_atividade
+  }
+
+  return merged
 }
 
 // ─── BrasilAPI engine ──────────────────────────────────────────────────────
