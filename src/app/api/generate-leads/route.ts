@@ -167,6 +167,21 @@ function sendEvent(
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
 }
 
+/**
+ * Send a SSE comment line. Lines starting with ':' are ignored by the
+ * EventSource client but DO force network proxies (Vercel edge, nginx,
+ * Cloudflare) to flush their buffer. Used as keep-alive heartbeats and
+ * as initial padding so the response starts streaming immediately
+ * instead of waiting for the first real event ~30s in.
+ */
+function sendComment(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  text: string,
+) {
+  controller.enqueue(encoder.encode(`: ${text}\n\n`))
+}
+
 // ─── Anti-fabrication guardrails ────────────────────────────────────────────
 // These strip values the LLM made up (CNPJ placeholders, sequential phones)
 // even when the prompt explicitly forbids them — models occasionally slip.
@@ -294,6 +309,22 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      // Initial padding: 2KB of SSE comment data so any proxy buffer fills
+      // and starts flushing immediately. Without this, the first real event
+      // can be held up to 30s by Vercel/edge buffers.
+      controller.enqueue(encoder.encode(`: ${' '.repeat(2048)}\n\n`))
+      controller.enqueue(encoder.encode(`: stream-open ${Date.now()}\n\n`))
+
+      // Heartbeat every 5s during long Anthropic calls keeps the connection
+      // alive AND forces incremental flush. Cleared at the end.
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: heartbeat ${Date.now()}\n\n`))
+        } catch {
+          /* controller may already be closed */
+        }
+      }, 5000)
+
       try {
         // Auth check
         const supabase = await createClient()
@@ -1229,15 +1260,24 @@ REGRAS FINAIS:
         const msg = err instanceof Error ? err.message : 'Erro interno'
         sendEvent(controller, encoder, { type: 'error', message: msg })
         controller.close()
+      } finally {
+        // Always clear heartbeat — prevents enqueue-after-close warnings
+        // and frees the timer.
+        clearInterval(heartbeat)
       }
     },
   })
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      // 'no-transform' impede gzip por proxies (gzip costuma bufferar SSE
+      // até completar a janela). 'X-Accel-Buffering: no' é a flag que
+      // Nginx/proxy reconhece pra desabilitar buffer (Vercel honra).
+      'Cache-Control': 'no-cache, no-transform, no-store',
       'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Transfer-Encoding': 'chunked',
     },
   })
 }
