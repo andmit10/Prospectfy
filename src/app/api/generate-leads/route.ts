@@ -67,46 +67,63 @@ const inputSchema = z.object({
   }
 })
 
+// ─── Zod helpers: LLM often returns null instead of missing fields.
+// These coerce null/undefined into sensible defaults BEFORE type validation,
+// fixing the "Expected string, received null" rejection that was dropping
+// every single lead when the prompt told the LLM to use null for unknowns.
+const zStr = (def = '') =>
+  z.preprocess((v) => (v == null ? def : v), z.string().catch(def))
+const zNum = (def = 0) =>
+  z.preprocess((v) => (v == null ? def : v), z.number().catch(def))
+const zBool = (def = false) =>
+  z.preprocess((v) => (v == null ? def : v), z.boolean().catch(def))
+
 // A single decision-maker. We deliberately use a search URL (not a direct
 // /in/<slug> URL) because the LLM has no way to verify a profile actually
 // exists — search URLs always work and let the user click through to the
 // real result.
 const decisorSchema = z.object({
-  nome: z.string(),
-  cargo: z.string().optional().default(''),
-  email: z.string().optional().default(''),
-  whatsapp: z.string().optional().default(''),
-  linkedin_url: z.string().optional().default(''),
-  principal: z.boolean().optional().default(false),
+  nome: zStr(),
+  cargo: zStr(),
+  email: zStr(),
+  whatsapp: zStr(),
+  linkedin_url: zStr(),
+  principal: zBool(false),
 })
 
 const leadSchema = z.object({
-  empresa_nome: z.string(),
+  empresa_nome: zStr(),
   // Legacy single-decisor fields kept for backwards compat with downstream
   // code (DataTable column, exports, agent prompt vars). We populate these
   // from `decisores[0]` when the LLM returns the array form.
-  decisor_nome: z.string(),
-  decisor_cargo: z.string().optional().default(''),
-  segmento: z.string().optional().default(''),
-  cidade: z.string().optional().default(''),
-  estado: z.string().optional().default(''),
-  email: z.string().optional().default(''),
-  whatsapp: z.string(),
-  telefone: z.string().optional().default(''),
-  linkedin_url: z.string().optional().default(''),
-  cnpj: z.string().optional().default(''),
-  cnpj_ativo: z.boolean().optional().default(true),
-  rating_maps: z.number().min(0).max(5).optional().default(0),
-  total_avaliacoes: z.number().optional().default(0),
-  porte: z.string().optional().default(''),
-  funcionarios_estimados: z.number().optional().default(0),
-  score: z.number().min(0).max(100).default(50),
+  decisor_nome: zStr(),
+  decisor_cargo: zStr(),
+  segmento: zStr(),
+  cidade: zStr(),
+  estado: zStr(),
+  email: zStr(),
+  whatsapp: zStr(),
+  telefone: zStr(),
+  linkedin_url: zStr(),
+  cnpj: zStr(),
+  cnpj_ativo: zBool(true),
+  rating_maps: z.preprocess(
+    (v) => (v == null ? 0 : v),
+    z.number().min(0).max(5).catch(0),
+  ),
+  total_avaliacoes: zNum(0),
+  porte: zStr(),
+  funcionarios_estimados: zNum(0),
+  score: z.preprocess(
+    (v) => (v == null ? 50 : v),
+    z.number().min(0).max(100).catch(50),
+  ),
   score_detalhes: z.object({
-    maps_presenca: z.number().default(0),
-    decisor_encontrado: z.number().default(0),
-    email_validado: z.number().default(0),
-    linkedin_ativo: z.number().default(0),
-    porte_match: z.number().default(0),
+    maps_presenca: zNum(0),
+    decisor_encontrado: zNum(0),
+    email_validado: zNum(0),
+    linkedin_ativo: zNum(0),
+    porte_match: zNum(0),
   }).optional().default({
     maps_presenca: 0,
     decisor_encontrado: 0,
@@ -116,21 +133,21 @@ const leadSchema = z.object({
   }),
   // ─── New enrichment fields (Phase C) ───
   decisores: z.array(decisorSchema).optional().default([]),
-  mensagem_whatsapp: z.string().optional().default(''),
-  mensagem_email_assunto: z.string().optional().default(''),
-  mensagem_email_corpo: z.string().optional().default(''),
-  justificativa_score: z.string().optional().default(''),
-  horario_ideal: z.string().optional().default(''),
+  mensagem_whatsapp: zStr(),
+  mensagem_email_assunto: zStr(),
+  mensagem_email_corpo: zStr(),
+  justificativa_score: zStr(),
+  horario_ideal: zStr(),
   // ─── External verification flags (Phase D) ───
   // List of external sources that confirmed at least one field on this lead.
   // UI renders green "Verificado" badge when list is non-empty.
   verified_sources: z.array(z.enum(['receita_federal', 'google_places', 'email_mx'])).optional().default([]),
   // Extra enrichment fields from Receita (when verified_sources includes receita_federal)
-  razao_social: z.string().optional().default(''),
-  nome_fantasia: z.string().optional().default(''),
-  endereco: z.string().optional().default(''),
-  cnae_descricao: z.string().optional().default(''),
-  situacao_cadastral: z.string().optional().default(''),
+  razao_social: zStr(),
+  nome_fantasia: zStr(),
+  endereco: zStr(),
+  cnae_descricao: zStr(),
+  situacao_cadastral: zStr(),
 })
 
 // SSE helper: send a JSON event to the stream
