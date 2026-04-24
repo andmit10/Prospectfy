@@ -36,7 +36,7 @@ const inputSchema = z.object({
   bairro: z.string().optional(),
   regiao: z.string().optional(),
   raio_km: z.number().optional(),
-  quantidade: z.number().min(1).max(500).default(50),
+  quantidade: z.number().min(1).max(100).default(50),
   cargo_alvo: z.string().optional(),
   cargos_alvo: z.array(z.string()).optional(),
   rating_minimo: z.number().min(0).max(5).default(0),
@@ -825,11 +825,12 @@ REGRAS FINAIS:
           message: 'Identificando decisores e quadro societário...',
         })
 
-        // Chunking: split into batches of max 25 leads to stay within token limits
-        // Smaller batches now that each lead is bigger (decisores array +
-        // 4 enrichment fields = ~3x payload). 15 keeps us well under the
-        // 16k output token cap.
-        const BATCH_SIZE = 15
+        // Chunking: max 10 leads per batch (smaller = faster individual response,
+        // and lets us stream leads to the UI as each batch completes instead
+        // of waiting for the slowest one). With CONCURRENCY=5, the user starts
+        // seeing leads in ~30s instead of staring at a blank screen for 2min.
+        const BATCH_SIZE = 10
+        const CONCURRENCY = 5 // max paralelas — evita rate-limit Anthropic
         const batches: number[] = []
         let remaining = quantidade
         while (remaining > 0) {
@@ -842,173 +843,187 @@ REGRAS FINAIS:
         // The Gateway parses/repairs JSON for every call; we only need the fallback
         // cast below when the provider returns raw strings.
 
-        // Run batches in parallel through the LLM Gateway. The `extract`
-        // task is a permissive schema tier — the inner batched prompt still
-        // asks for a JSON array, and we let the Gateway's extractJson handle
-        // markdown fences / partial content. Telemetry (modelId, latency,
-        // cost) is recorded per batch by the Gateway.
-        // Search mode can also return a {status:"not_found"} sentinel object,
-        // so we accept either shape and normalize below.
         type BatchOutput =
           | { kind: 'array'; items: unknown[] }
           | { kind: 'not_found'; reason: string; suggestion: string }
 
-        const batchResults: BatchOutput[] = await Promise.all(
-          batches.map(async (batchSize): Promise<BatchOutput> => {
-            // ~900 tokens/lead now (was ~400) due to decisores + enrichment.
-            const maxTokens = Math.min(16000, Math.max(4096, batchSize * 900))
-            try {
-              const result = await llm.extract<unknown>({
-                user: isSearch ? buildSearchPrompt() : buildPrompt(batchSize),
-                // Permissive — may be array (leads) or object (not_found
-                // sentinel in search mode).
-                schema: {},
-                maxTokens,
-                orgId,
-                userId: user.id,
-              })
-              // `result.data` is whatever extractJson produced; may already be
-              // parsed or may be a string we still need to extract JSON from.
-              const raw: unknown = Array.isArray(result.data) || (result.data && typeof result.data === 'object')
-                ? result.data
-                : extractJson(String(result.data ?? ''))
+        // Capture user.id once — narrowing is lost across callback boundaries.
+        const userIdForBatch = user.id
+        async function runBatch(batchSize: number): Promise<BatchOutput> {
+          const maxTokens = Math.min(16000, Math.max(4096, batchSize * 900))
+          try {
+            const result = await llm.extract<unknown>({
+              user: isSearch ? buildSearchPrompt() : buildPrompt(batchSize),
+              schema: {},
+              maxTokens,
+              orgId,
+              userId: userIdForBatch,
+            })
+            const raw: unknown = Array.isArray(result.data) || (result.data && typeof result.data === 'object')
+              ? result.data
+              : extractJson(String(result.data ?? ''))
 
-              // Not-found sentinel (search mode) — {status:"not_found",...}
-              if (
-                raw !== null &&
-                typeof raw === 'object' &&
-                !Array.isArray(raw) &&
-                (raw as { status?: unknown }).status === 'not_found'
-              ) {
-                const obj = raw as { reason?: string; suggestion?: string }
-                return {
-                  kind: 'not_found',
-                  reason: obj.reason || 'Empresa não localizada com dados confiáveis.',
-                  suggestion: obj.suggestion || 'Tente o CNPJ completo ou o nome + cidade/UF.',
-                }
+            if (
+              raw !== null &&
+              typeof raw === 'object' &&
+              !Array.isArray(raw) &&
+              (raw as { status?: unknown }).status === 'not_found'
+            ) {
+              const obj = raw as { reason?: string; suggestion?: string }
+              return {
+                kind: 'not_found',
+                reason: obj.reason || 'Empresa não localizada com dados confiáveis.',
+                suggestion: obj.suggestion || 'Tente o CNPJ completo ou o nome + cidade/UF.',
               }
-
-              return { kind: 'array', items: Array.isArray(raw) ? raw : [] }
-            } catch (err) {
-              console.error('[generate-leads] batch error:', err)
-              return { kind: 'array', items: [] }
             }
-          })
-        )
-
-        // Search mode: honor not_found before running the rest of the pipeline.
-        if (isSearch) {
-          const nf = batchResults.find((b): b is Extract<BatchOutput, { kind: 'not_found' }> => b.kind === 'not_found')
-          if (nf) {
-            sendEvent(controller, encoder, {
-              type: 'progress',
-              step: 'maps',
-              status: 'done',
-              message: nf.reason,
-            })
-            sendEvent(controller, encoder, {
-              type: 'error',
-              reason: 'not_found',
-              message: `${nf.reason} ${nf.suggestion}`,
-            })
-            controller.close()
-            return
+            return { kind: 'array', items: Array.isArray(raw) ? raw : [] }
+          } catch (err) {
+            console.error('[generate-leads] batch error:', err)
+            return { kind: 'array', items: [] }
           }
         }
 
-        const combined = batchResults.flatMap((b) => (b.kind === 'array' ? b.items : []))
+        // ── Streaming: process batches in waves of CONCURRENCY, validate +
+        // sanitize + dedup each completed batch IMMEDIATELY, and emit a
+        // `lead_batch` SSE event so the UI can render leads progressively.
+        // The user sees the first batch ~30s in instead of waiting for the
+        // whole job to finish.
 
-        // Step 3: LinkedIn
-        sendEvent(controller, encoder, {
-          type: 'progress',
-          step: 'decisor',
-          status: 'done',
-          message: `Decisores identificados com sucesso`,
-        })
-        sendEvent(controller, encoder, {
-          type: 'progress',
-          step: 'linkedin',
-          status: 'running',
-          message: 'Verificando perfis no LinkedIn...',
-        })
-
-        if (combined.length === 0) {
-          sendEvent(controller, encoder, { type: 'error', message: 'IA não retornou formato esperado. Tente novamente.' })
-          controller.close()
-          return
-        }
-
-        // Validate leniently: drop only malformed leads, keep valid ones.
-        // Also filter out any duplicates that Claude generated despite the exclude list.
-        // Each passing lead is sanitized — synthetic CNPJs/phones get stripped
-        // here even if the prompt guardrails didn't catch them.
+        // Track all valid leads cumulatively (for dedup + final stats + counter)
         const validLeads: z.infer<typeof leadSchema>[] = []
         const seenWhatsapp = new Set<string>()
         const seenCompany = new Set<string>()
         let dedupSkipped = 0
         let cnpjStrippedCount = 0
         let phoneStrippedCount = 0
-        for (const item of combined) {
-          const ok = leadSchema.safeParse(item)
-          if (!ok.success) continue
-          const { lead, flags } = sanitizeLead(ok.data)
-          if (flags.cnpjStripped) cnpjStrippedCount++
-          if (flags.telefoneStripped || flags.whatsappStripped) phoneStrippedCount++
+        let firstBatchEmitted = false
 
-          // Phase D: if we have ground-truth Receita data, OVERWRITE the
-          // identity fields on the lead so the LLM can't accidentally
-          // fabricate anything different. Mark the source for UI badge.
-          if (receitaData && isSearch) {
-            lead.cnpj = receitaData.cnpj_formatted
-            lead.cnpj_ativo = receitaData.cnpj_ativo
-            lead.razao_social = receitaData.razao_social
-            lead.nome_fantasia = receitaData.nome_fantasia ?? ''
-            lead.empresa_nome = receitaData.nome_fantasia || receitaData.razao_social
-            lead.cidade = receitaData.cidade ?? lead.cidade
-            lead.estado = receitaData.estado ?? lead.estado
-            lead.situacao_cadastral = receitaData.situacao_cadastral
-            lead.cnae_descricao = receitaData.cnae_fiscal_descricao ?? ''
-            const enderecoLinha = [receitaData.logradouro, receitaData.numero, receitaData.bairro]
-              .filter(Boolean)
-              .join(', ')
-            lead.endereco = enderecoLinha
-            // Prefer Receita phone/email over LLM guesses when Receita has them.
-            if (receitaData.telefone) lead.telefone = receitaData.telefone
-            if (receitaData.email) lead.email = receitaData.email
-            // If Receita's phone is a cellphone AND LLM didn't supply a
-            // WhatsApp (or gave an obvious-fake one that got stripped),
-            // promote Receita's number to the WhatsApp field.
-            if (receitaData.telefone_mobile && receitaData.telefone && !lead.whatsapp) {
-              lead.whatsapp = `55${receitaData.telefone.replace(/\D/g, '')}`
-            }
-            // For solo entities (EI/MEI), the LLM often guesses a fake
-            // titular name. If the Receita data confirms it's a solo
-            // entity and the LLM didn't pull the name from any QSA
-            // (because there is no QSA), we blank the decisor to avoid
-            // misleading the user.
-            if (receitaData.is_solo_entity && receitaData.socios.length === 0) {
-              lead.decisor_nome = ''
-              lead.decisor_cargo = 'Empresário Individual'
-              lead.decisores = []
-            }
-            // Flag the source so UI renders green "Verificado" badge.
-            lead.verified_sources = Array.from(new Set([...(lead.verified_sources ?? []), 'receita_federal']))
-          }
-
-          const companyKey = lead.empresa_nome.trim().toLowerCase()
-
-          // Skip if already in user's DB (by whatsapp or CNPJ) or duplicated within batch.
-          // Empty whatsapp after sanitization is still allowed — UI marks it as não-verificado.
-          if (lead.whatsapp && existingWhatsapps.has(lead.whatsapp)) { dedupSkipped++; continue }
-          if (lead.cnpj && existingCnpjs.has(lead.cnpj)) { dedupSkipped++; continue }
-          if (lead.whatsapp && seenWhatsapp.has(lead.whatsapp)) { dedupSkipped++; continue }
-          if (seenCompany.has(companyKey)) { dedupSkipped++; continue }
-
-          if (lead.whatsapp) seenWhatsapp.add(lead.whatsapp)
-          seenCompany.add(companyKey)
-          validLeads.push(lead)
+        // Search-mode early-exit if any not_found shows up
+        function handleNotFound(b: Extract<BatchOutput, { kind: 'not_found' }>) {
+          sendEvent(controller, encoder, {
+            type: 'progress',
+            step: 'maps',
+            status: 'done',
+            message: b.reason,
+          })
+          sendEvent(controller, encoder, {
+            type: 'error',
+            reason: 'not_found',
+            message: `${b.reason} ${b.suggestion}`,
+          })
         }
 
+        // Process one batch's items: schema check, sanitize, dedup, emit.
+        function processBatchItems(items: unknown[]): {
+          accepted: z.infer<typeof leadSchema>[]
+          batchCnpjStripped: number
+          batchPhoneStripped: number
+          batchDedupSkipped: number
+        } {
+          const accepted: z.infer<typeof leadSchema>[] = []
+          let batchCnpjStripped = 0
+          let batchPhoneStripped = 0
+          let batchDedupSkipped = 0
+          for (const item of items) {
+            const ok = leadSchema.safeParse(item)
+            if (!ok.success) continue
+            const { lead, flags } = sanitizeLead(ok.data)
+            if (flags.cnpjStripped) batchCnpjStripped++
+            if (flags.telefoneStripped || flags.whatsappStripped) batchPhoneStripped++
+
+            // Apply Receita merge in search mode (same logic as before)
+            if (receitaData && isSearch) {
+              lead.cnpj = receitaData.cnpj_formatted
+              lead.cnpj_ativo = receitaData.cnpj_ativo
+              lead.razao_social = receitaData.razao_social
+              lead.nome_fantasia = receitaData.nome_fantasia ?? ''
+              lead.empresa_nome = receitaData.nome_fantasia || receitaData.razao_social
+              lead.cidade = receitaData.cidade ?? lead.cidade
+              lead.estado = receitaData.estado ?? lead.estado
+              lead.situacao_cadastral = receitaData.situacao_cadastral
+              lead.cnae_descricao = receitaData.cnae_fiscal_descricao ?? ''
+              const enderecoLinha = [receitaData.logradouro, receitaData.numero, receitaData.bairro]
+                .filter(Boolean)
+                .join(', ')
+              lead.endereco = enderecoLinha
+              if (receitaData.telefone) lead.telefone = receitaData.telefone
+              if (receitaData.email) lead.email = receitaData.email
+              if (receitaData.telefone_mobile && receitaData.telefone && !lead.whatsapp) {
+                lead.whatsapp = `55${receitaData.telefone.replace(/\D/g, '')}`
+              }
+              if (receitaData.is_solo_entity && receitaData.socios.length === 0) {
+                lead.decisor_nome = ''
+                lead.decisor_cargo = 'Empresário Individual'
+                lead.decisores = []
+              }
+              lead.verified_sources = Array.from(new Set([...(lead.verified_sources ?? []), 'receita_federal']))
+            }
+
+            const companyKey = lead.empresa_nome.trim().toLowerCase()
+            if (lead.whatsapp && existingWhatsapps.has(lead.whatsapp)) { batchDedupSkipped++; continue }
+            if (lead.cnpj && existingCnpjs.has(lead.cnpj)) { batchDedupSkipped++; continue }
+            if (lead.whatsapp && seenWhatsapp.has(lead.whatsapp)) { batchDedupSkipped++; continue }
+            if (seenCompany.has(companyKey)) { batchDedupSkipped++; continue }
+
+            if (lead.whatsapp) seenWhatsapp.add(lead.whatsapp)
+            seenCompany.add(companyKey)
+            accepted.push(lead)
+          }
+          return { accepted, batchCnpjStripped, batchPhoneStripped, batchDedupSkipped }
+        }
+
+        // Process batches in waves, emitting SSE events as soon as each batch
+        // (within a wave) finishes — we use Promise.allSettled per wave but
+        // resolve each batch's emit individually via inline await.
+        for (let i = 0; i < batches.length; i += CONCURRENCY) {
+          const wave = batches.slice(i, i + CONCURRENCY)
+
+          await Promise.all(
+            wave.map(async (batchSize, idxInWave) => {
+              const batchOutput = await runBatch(batchSize)
+              if (batchOutput.kind === 'not_found') {
+                if (isSearch) handleNotFound(batchOutput)
+                return
+              }
+
+              const { accepted, batchCnpjStripped, batchPhoneStripped, batchDedupSkipped } =
+                processBatchItems(batchOutput.items)
+              cnpjStrippedCount += batchCnpjStripped
+              phoneStrippedCount += batchPhoneStripped
+              dedupSkipped += batchDedupSkipped
+
+              if (accepted.length > 0) {
+                validLeads.push(...accepted)
+                // First batch: also signal the pipeline has moved past
+                // decisor/linkedin/email steps so the UI doesn't show them
+                // forever. Subsequent batches just stream more leads.
+                if (!firstBatchEmitted) {
+                  firstBatchEmitted = true
+                  sendEvent(controller, encoder, { type: 'progress', step: 'decisor', status: 'done', message: 'Decisores identificados' })
+                  sendEvent(controller, encoder, { type: 'progress', step: 'linkedin', status: 'done', message: `${validLeads.filter(l => l.linkedin_url).length} perfis LinkedIn` })
+                  sendEvent(controller, encoder, { type: 'progress', step: 'email', status: 'running', message: 'Validando e-mails...' })
+                }
+                sendEvent(controller, encoder, {
+                  type: 'lead_batch',
+                  leads: accepted,
+                  total_so_far: validLeads.length,
+                  total_target: quantidade,
+                  wave: Math.floor(i / CONCURRENCY),
+                  batch_in_wave: idxInWave,
+                })
+              }
+            }),
+          )
+
+          // Search mode short-circuits on the first not_found
+          if (isSearch && validLeads.length === 0 && i === 0) {
+            // handleNotFound already sent error event; close the stream
+            controller.close()
+            return
+          }
+        }
+
+        // ── Aggregate logs from waves above ──
         if (dedupSkipped > 0) {
           sendEvent(controller, encoder, {
             type: 'log',
@@ -1140,30 +1155,14 @@ REGRAS FINAIS:
         }
 
         if (validLeads.length === 0) {
-          // Emit a compact, Vercel-friendly diagnostic. Parse each item in
-          // `combined` individually so we can see WHICH fields are missing
-          // on each lead. Previous .flatten() output was truncated by Vercel.
-          const perItemIssues: string[] = []
-          combined.slice(0, 3).forEach((item, idx) => {
-            const res = leadSchema.safeParse(item)
-            if (!res.success) {
-              const firstThree = res.error.issues.slice(0, 5).map((iss) => {
-                const path = iss.path.join('.')
-                return `${path || '(root)'}: ${iss.message.slice(0, 60)}`
-              })
-              perItemIssues.push(`item[${idx}] ${firstThree.join(' | ')}`)
-            }
-          })
-          log.warn('generate-leads schema fail', {
-            combined_count: combined.length,
-            sample_issues: perItemIssues,
-            first_item_keys: combined[0] && typeof combined[0] === 'object'
-              ? Object.keys(combined[0] as object).slice(0, 20).join(',')
-              : 'none',
+          log.warn('generate-leads zero valid leads after waves', {
+            batches_count: batches.length,
+            quantidade,
+            isSearch,
           })
           sendEvent(controller, encoder, {
             type: 'error',
-            message: `Leads em formato inválido (IA retornou ${combined.length} itens mas nenhum passou no schema). Tente novamente ou abra /api/debug/test-generate para diagnóstico.`,
+            message: 'Nenhum lead válido foi gerado. Tente outro segmento ou region, ou abra /api/debug/test-generate para diagnóstico.',
           })
           controller.close()
           return
@@ -1171,40 +1170,15 @@ REGRAS FINAIS:
 
         const leads = { data: validLeads }
 
-        // Step 4: Email
-        sendEvent(controller, encoder, {
-          type: 'progress',
-          step: 'linkedin',
-          status: 'done',
-          message: `${leads.data.filter(l => l.linkedin_url).length} perfis LinkedIn encontrados`,
-        })
-        sendEvent(controller, encoder, {
-          type: 'progress',
-          step: 'email',
-          status: 'running',
-          message: 'Validando e-mails corporativos...',
-        })
-
-        // Simulate email validation delay
-        await new Promise(r => setTimeout(r, 500))
-
+        // Final pipeline events. Most steps already advanced inside the wave
+        // loop (decisor done after first batch, etc). Now we just wrap up
+        // email/score so the stepper hits 100%.
         sendEvent(controller, encoder, {
           type: 'progress',
           step: 'email',
           status: 'done',
-          message: `${leads.data.filter(l => l.email).length} e-mails validados`,
+          message: `${leads.data.filter(l => l.email).length} e-mails informados`,
         })
-
-        // Step 5: Score
-        sendEvent(controller, encoder, {
-          type: 'progress',
-          step: 'score',
-          status: 'running',
-          message: 'Calculando ProspectScore 0-100 por lead...',
-        })
-
-        await new Promise(r => setTimeout(r, 400))
-
         sendEvent(controller, encoder, {
           type: 'progress',
           step: 'score',

@@ -217,7 +217,7 @@ const PORTES: { value: string; label: string }[] = [
   { value: 'grande', label: 'Grande (200+)' },
 ]
 
-const QUANTIDADES = [10, 25, 50, 100, 200]
+const QUANTIDADES = [10, 25, 50, 100]
 
 const INITIAL_PIPELINE: PipelineStep[] = [
   { id: 'maps', label: 'Maps', icon: Map, status: 'pending', message: '' },
@@ -231,7 +231,7 @@ const formSchema = z.object({
   segmento: z.string().min(1, 'Informe o segmento'),
   cidade: z.string().optional(),
   estado: z.string().optional(),
-  quantidade: z.number().min(10).max(200),
+  quantidade: z.number().min(10).max(100),
   cargo_alvo: z.string().optional(),
   rating_minimo: z.number().min(0).max(5),
   apenas_cnpj_ativo: z.boolean(),
@@ -1699,10 +1699,29 @@ export function LeadGenerator() {
             }
           }
 
+          // Streaming: each LLM batch finished — append leads as they arrive.
+          // Lets the user see the first cards in ~30s instead of waiting for
+          // the whole job (10 leads × 10s = 100s if sequential).
+          if (data.type === 'lead_batch' && Array.isArray(data.leads)) {
+            setResults(prev => {
+              const next = [...prev, ...(data.leads as GeneratedLead[])]
+              setSelected(s => new Set([...s, ...data.leads.map((_: GeneratedLead, i: number) => prev.length + i)]))
+              return next
+            })
+            const target = typeof data.total_target === 'number' ? data.total_target : requestedQty
+            const soFar = typeof data.total_so_far === 'number' ? data.total_so_far : 0
+            if (target > 0) setProgress(Math.min(80 + (soFar / target) * 18, 98))
+            addLog(`+${data.leads.length} leads — ${soFar}/${target}`, 'success')
+          }
+
           if (data.type === 'complete') {
-            setResults(data.leads)
-            setSelected(new Set(data.leads.map((_: GeneratedLead, i: number) => i)))
-            setStats(data.stats)
+            // Some streams pre-populated via lead_batch; complete may also
+            // include the full leads array — prefer it when present (canonical).
+            if (Array.isArray(data.leads) && data.leads.length > 0) {
+              setResults(data.leads)
+              setSelected(new Set(data.leads.map((_: GeneratedLead, i: number) => i)))
+            }
+            setStats(data.stats ?? {})
             setProgress(100)
             addLog(`Concluído — ${data.total} leads gerados`, 'success')
             toast.success(`${data.total} leads gerados com sucesso!`)
