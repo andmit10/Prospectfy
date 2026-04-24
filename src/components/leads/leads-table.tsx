@@ -157,6 +157,9 @@ export function LeadsTable() {
             table.toggleAllPageRowsSelected(!!checked)
           }}
           aria-label="Selecionar todos"
+          // Borda mais escura + tamanho maior pra destacar do fundo bege/creme.
+          // Default era border-input (cinza muito claro) — usuário não enxergava.
+          className="size-5 border-2 border-[var(--text-secondary)] data-checked:border-[var(--primary)]"
         />
       ),
       cell: ({ row }) => (
@@ -166,6 +169,7 @@ export function LeadsTable() {
             row.toggleSelected(!!checked)
           }}
           aria-label="Selecionar linha"
+          className="size-5 border-2 border-[var(--text-secondary)] data-checked:border-[var(--primary)]"
         />
       ),
       enableSorting: false,

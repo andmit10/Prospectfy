@@ -133,7 +133,7 @@ type GeneratedLead = {
   justificativa_score?: string
   horario_ideal?: string
   // Phase D — external verification flags
-  verified_sources?: Array<'receita_federal' | 'google_places' | 'email_mx'>
+  verified_sources?: Array<'receita_federal' | 'google_places' | 'email_mx' | 'http_probe'>
   situacao_cadastral?: string
   cnae_descricao?: string
   endereco?: string
@@ -786,6 +786,7 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
                 const receitaVerified = sources.includes('receita_federal')
                 const mapsVerified = sources.includes('google_places')
                 const emailVerified = sources.includes('email_mx')
+                const websiteVerified = sources.includes('http_probe')
 
                 // Banner: verde se algo foi verificado externamente, amarelo se
                 // tudo veio só da IA sem conferência de fonte externa.
@@ -838,7 +839,7 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
                           type Row = {
                             field: string
                             value: string | null
-                            source: 'receita_federal' | 'google_places' | 'linkedin' | 'email_mx' | 'ai' | 'empty'
+                            source: 'receita_federal' | 'google_places' | 'linkedin' | 'email_mx' | 'http_probe' | 'ai' | 'empty'
                           }
                           const rows: Row[] = [
                             {
@@ -885,6 +886,11 @@ function LeadDetailPanel({ lead }: { lead: GeneratedLead }) {
                               field: 'LinkedIn',
                               value: lead.linkedin_url ? 'URL de busca' : null,
                               source: lead.linkedin_url ? 'linkedin' : 'empty',
+                            },
+                            {
+                              field: 'Website',
+                              value: lead.website || null,
+                              source: websiteVerified ? 'http_probe' : (lead.website ? 'ai' : 'empty'),
                             },
                             {
                               field: 'Decisor',
@@ -1494,6 +1500,18 @@ function ReceitaFederalIcon({ size = 14 }: { size?: number }) {
   )
 }
 
+/** Website verified via HTTP probe — globo verde com check. */
+function HttpProbeIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Site verificado online" style={{ display: 'block' }}>
+      <circle cx="10" cy="12" r="9" fill="none" stroke="#047857" strokeWidth="1.8" />
+      <path d="M1 12h18 M10 3 a13 13 0 0 1 0 18 M10 3 a13 13 0 0 0 0 18" fill="none" stroke="#047857" strokeWidth="1.4" />
+      <circle cx="19" cy="6" r="4" fill="#10B981" />
+      <path d="M17 6l1.2 1.2L21 4.5" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** E-mail verified (MX check) — envelope com checkmark. */
 function EmailMxIcon({ size = 14 }: { size?: number }) {
   return (
@@ -1542,7 +1560,7 @@ function EmptySourceIcon({ size = 14 }: { size?: number }) {
 function SourceBrandBadge({
   source,
 }: {
-  source: 'receita_federal' | 'google_places' | 'linkedin' | 'email_mx' | 'ai' | 'empty'
+  source: 'receita_federal' | 'google_places' | 'linkedin' | 'email_mx' | 'http_probe' | 'ai' | 'empty'
 }) {
   const config: Record<
     typeof source,
@@ -1552,6 +1570,7 @@ function SourceBrandBadge({
     google_places: { Icon: GoogleGIcon, label: 'Fonte: Google Maps / Places' },
     linkedin: { Icon: LinkedInIcon, label: 'Fonte: LinkedIn' },
     email_mx: { Icon: EmailMxIcon, label: 'Validado via MX check' },
+    http_probe: { Icon: HttpProbeIcon, label: 'Verificado via HTTP probe (site responde online)' },
     ai: { Icon: AiBadgeIcon, label: 'Sugestão da IA · não verificado externamente' },
     empty: { Icon: EmptySourceIcon, label: 'Sem dado disponível' },
   }

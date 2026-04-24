@@ -11,6 +11,7 @@ import {
 import { childLogger } from '@/lib/logger'
 import { enforceRateLimit, clientIdFromRequest } from '@/lib/rate-limit'
 import { verifyCnpj, normalizeCnpj, type CnpjVerified } from '@/lib/verification/cnpj'
+import { detectWebsite } from '@/lib/verification/website'
 import { z } from 'zod'
 
 const log = childLogger('api:generate-leads')
@@ -149,13 +150,16 @@ const leadSchema = z.object({
   // ─── External verification flags (Phase D) ───
   // List of external sources that confirmed at least one field on this lead.
   // UI renders green "Verificado" badge when list is non-empty.
-  verified_sources: z.array(z.enum(['receita_federal', 'google_places', 'email_mx'])).optional().default([]),
+  verified_sources: z.array(z.enum(['receita_federal', 'google_places', 'email_mx', 'http_probe'])).optional().default([]),
   // Extra enrichment fields from Receita (when verified_sources includes receita_federal)
   razao_social: zStr(),
   nome_fantasia: zStr(),
   endereco: zStr(),
   cnae_descricao: zStr(),
   situacao_cadastral: zStr(),
+  // Website verificado via HEAD probe (verified_sources inclui http_probe).
+  // O LLM também pode preencher esse campo, mas sem o flag de verificação.
+  website: zStr(),
 })
 
 // SSE helper: send a JSON event to the stream
@@ -945,12 +949,12 @@ REGRAS FINAIS:
         }
 
         // Process one batch's items: schema check, sanitize, dedup, emit.
-        function processBatchItems(items: unknown[]): {
+        async function processBatchItems(items: unknown[]): Promise<{
           accepted: z.infer<typeof leadSchema>[]
           batchCnpjStripped: number
           batchPhoneStripped: number
           batchDedupSkipped: number
-        } {
+        }> {
           const accepted: z.infer<typeof leadSchema>[] = []
           let batchCnpjStripped = 0
           let batchPhoneStripped = 0
@@ -990,6 +994,25 @@ REGRAS FINAIS:
               lead.verified_sources = Array.from(new Set([...(lead.verified_sources ?? []), 'receita_federal']))
             }
 
+            // Phase E: probe HTTP pra encontrar website real quando o LLM
+            // não retornou (search mode com receitaData ou no discover quando
+            // o nome da empresa é forte). Só roda em search mode pra evitar
+            // 8 probes × 50 leads no discover.
+            if (isSearch && !lead.website) {
+              const nameForProbe = lead.nome_fantasia || lead.razao_social || lead.empresa_nome
+              if (nameForProbe && nameForProbe.length >= 2) {
+                try {
+                  const ws = await detectWebsite(nameForProbe, { timeoutMs: 2500 })
+                  if (ws.verified) {
+                    lead.website = ws.url
+                    lead.verified_sources = Array.from(new Set([...(lead.verified_sources ?? []), 'http_probe']))
+                  }
+                } catch {
+                  /* probe failed, leave website empty */
+                }
+              }
+            }
+
             const companyKey = lead.empresa_nome.trim().toLowerCase()
             if (lead.whatsapp && existingWhatsapps.has(lead.whatsapp)) { batchDedupSkipped++; continue }
             if (lead.cnpj && existingCnpjs.has(lead.cnpj)) { batchDedupSkipped++; continue }
@@ -1018,7 +1041,7 @@ REGRAS FINAIS:
               }
 
               const { accepted, batchCnpjStripped, batchPhoneStripped, batchDedupSkipped } =
-                processBatchItems(batchOutput.items)
+                await processBatchItems(batchOutput.items)
               cnpjStrippedCount += batchCnpjStripped
               phoneStrippedCount += batchPhoneStripped
               dedupSkipped += batchDedupSkipped
@@ -1120,6 +1143,20 @@ REGRAS FINAIS:
             ? 'Empresário Individual'
             : primarioSocio?.qualificacao ?? 'Sócio'
 
+          // Probe website antes do fallback (mesmo motivo do path acima).
+          let probedWebsite = ''
+          const probedSources: Array<'receita_federal' | 'http_probe'> = ['receita_federal']
+          const nameForProbe = r.nome_fantasia || r.razao_social
+          if (nameForProbe) {
+            try {
+              const ws = await detectWebsite(nameForProbe, { timeoutMs: 2500 })
+              if (ws.verified) {
+                probedWebsite = ws.url
+                probedSources.push('http_probe')
+              }
+            } catch { /* probe failed */ }
+          }
+
           const fallbackLead: z.infer<typeof leadSchema> = {
             empresa_nome: r.nome_fantasia || r.razao_social,
             razao_social: r.razao_social,
@@ -1138,6 +1175,7 @@ REGRAS FINAIS:
             email: r.email ?? '',
             whatsapp: whatsappFromReceita,
             linkedin_url: `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(r.nome_fantasia || r.razao_social)}`,
+            website: probedWebsite,
             rating_maps: 0,
             total_avaliacoes: 0,
             decisor_nome: primarioSocio?.nome ?? '',
@@ -1179,7 +1217,7 @@ REGRAS FINAIS:
             mensagem_whatsapp: '',
             mensagem_email_assunto: '',
             mensagem_email_corpo: '',
-            verified_sources: ['receita_federal'],
+            verified_sources: probedSources,
           }
 
           validLeads.push(fallbackLead)
