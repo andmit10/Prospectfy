@@ -15,6 +15,14 @@ import { z } from 'zod'
 
 const log = childLogger('api:generate-leads')
 
+// Vercel function configuration
+// Default 60s (Pro) is not enough for 10+ leads with Claude enrichment
+// (decisores + mensagens + score_detalhes ≈ 8-12s/lead).
+// 300s = max do plano Pro; nodejs runtime pq usamos `undici` em verifyCnpj.
+export const maxDuration = 300
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
 // Two modes:
 //   * 'discover' — classic flow. Filters + quantity, returns N leads.
 //   * 'search'   — enrich a single company by name or CNPJ, returns 1 lead.
