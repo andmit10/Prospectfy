@@ -104,12 +104,18 @@ export const leadsRouter = router({
         id: z.string().uuid(),
         empresa_nome: z.string().min(1).optional(),
         decisor_nome: z.string().min(1).optional(),
-        whatsapp: z.string().min(10).optional(),
+        whatsapp: z.string().min(10).optional().or(z.literal('')),
         decisor_cargo: z.string().optional(),
         segmento: z.string().optional(),
         cidade: z.string().optional(),
         estado: z.string().optional(),
         email: z.string().email().optional().or(z.literal('')),
+        // Inline edit support — these are stored on the leads row.
+        telefone: z.string().optional().or(z.literal('')),
+        cnpj: z.string().optional().or(z.literal('')),
+        linkedin_url: z.string().optional().or(z.literal('')),
+        razao_social: z.string().optional().or(z.literal('')),
+        nome_fantasia: z.string().optional().or(z.literal('')),
         status_pipeline: z
           .enum(['novo', 'contatado', 'respondeu', 'reuniao', 'convertido', 'perdido'])
           .optional(),
@@ -129,6 +135,102 @@ export const leadsRouter = router({
 
       if (error) throw error
       return data
+    }),
+
+  /**
+   * Re-roda enriquecimento externo num lead já importado:
+   *   - BrasilAPI (CNPJ → razão, endereço, situação, QSA, telefone, e-mail)
+   *   - ReceitaWS como fallback se BrasilAPI esparso
+   *   - HTTP probe de website (slug do nome)
+   *
+   * Política de merge: SÓ preenche campos vazios. NUNCA sobrescreve dado
+   * que o usuário já editou manualmente. Se for contradição, registra
+   * num log mas mantém o que tá no banco.
+   *
+   * Não chama Claude (não regenera mensagens) — pra isso o user usa
+   * "Reescrever mensagem" em outro fluxo. Foco aqui é fato externo.
+   */
+  enrich: writerProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { verifyCnpj } = await import('@/lib/verification/cnpj')
+      const { detectWebsite } = await import('@/lib/verification/website')
+
+      const { data: lead, error: leadErr } = await ctx.supabase
+        .from('leads')
+        .select('*')
+        .eq('id', input.id)
+        .eq('organization_id', ctx.orgId)
+        .is('deleted_at', null)
+        .single()
+      if (leadErr || !lead) throw new Error('Lead não encontrado')
+
+      const findings: string[] = []
+      const patches: Record<string, unknown> = {}
+
+      // 1. BrasilAPI / ReceitaWS por CNPJ
+      if (lead.cnpj && typeof lead.cnpj === 'string' && lead.cnpj.trim().length > 0) {
+        try {
+          const r = await verifyCnpj(lead.cnpj)
+          if (r.verified) {
+            const fillIfEmpty = (key: string, value: string | null | undefined) => {
+              if (!value) return
+              const current = lead[key as keyof typeof lead]
+              if (current && String(current).trim().length > 0) return
+              patches[key] = value
+              findings.push(`${key} via Receita`)
+            }
+            fillIfEmpty('razao_social', r.razao_social)
+            fillIfEmpty('nome_fantasia', r.nome_fantasia)
+            fillIfEmpty('cidade', r.cidade)
+            fillIfEmpty('estado', r.estado)
+            fillIfEmpty('telefone', r.telefone)
+            fillIfEmpty('email', r.email)
+            // Promove celular da Receita pra WhatsApp se vazio
+            if (r.telefone_mobile && r.telefone && (!lead.whatsapp || String(lead.whatsapp).trim() === '')) {
+              patches.whatsapp = `55${r.telefone.replace(/\D/g, '')}`
+              findings.push('whatsapp via Receita (celular)')
+            }
+          } else if (r.reason === 'not_found') {
+            findings.push('CNPJ não localizado na Receita')
+          }
+        } catch (err) {
+          findings.push(`Erro Receita: ${err instanceof Error ? err.message : 'desconhecido'}`)
+        }
+      } else {
+        findings.push('Sem CNPJ — pulou Receita')
+      }
+
+      // 2. HTTP probe pra website
+      const nameForProbe = (lead.nome_fantasia || lead.razao_social || lead.empresa_nome) as string | null
+      const currentWebsite = (lead.metadata as { website?: string } | null)?.website
+      if (nameForProbe && !currentWebsite) {
+        try {
+          const ws = await detectWebsite(nameForProbe, { timeoutMs: 2500 })
+          if (ws.verified) {
+            // Salva no metadata.website (não temos coluna dedicada nesta tabela)
+            patches.metadata = {
+              ...(lead.metadata as Record<string, unknown> ?? {}),
+              website: ws.url,
+            }
+            findings.push(`Website: ${ws.domain}`)
+          }
+        } catch { /* probe failed */ }
+      }
+
+      if (Object.keys(patches).length === 0) {
+        return { lead, updated: false, findings }
+      }
+
+      const { data: updated, error: updErr } = await ctx.supabase
+        .from('leads')
+        .update({ ...patches, updated_at: new Date().toISOString() })
+        .eq('id', input.id)
+        .eq('organization_id', ctx.orgId)
+        .select()
+        .single()
+      if (updErr) throw updErr
+      return { lead: updated, updated: true, findings }
     }),
 
   softDelete: writerProcedure

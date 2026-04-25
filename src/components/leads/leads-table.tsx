@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { PipelineBadge } from './pipeline-badge'
+import { EditableCell } from './editable-cell'
 import { trpc } from '@/lib/trpc-client'
 import {
   ArrowUpDown,
@@ -46,6 +47,8 @@ import {
   Link2,
   Mail,
   ExternalLink,
+  Sparkles,
+  Loader2,
 } from 'lucide-react'
 import {
   StarRating,
@@ -270,7 +273,7 @@ export function LeadsTable() {
         )
       },
     },
-    // TELEFONE / RATING — phone + stars from maps
+    // TELEFONE / RATING — phone (editável) + stars from maps
     {
       id: 'tel_rating',
       header: 'Telefone / Rating',
@@ -278,9 +281,12 @@ export function LeadsTable() {
         const meta = getMeta(row.original.metadata)
         return (
           <div>
-            <p className="text-sm text-[var(--text-primary)]">
-              {row.original.telefone || row.original.whatsapp || '—'}
-            </p>
+            <EditableCell
+              leadId={row.original.id}
+              field="telefone"
+              value={row.original.telefone || row.original.whatsapp}
+              className="text-sm text-[var(--text-primary)]"
+            />
             <div className="mt-0.5 flex items-center gap-1">
               <StarRating rating={meta.rating_maps ?? 0} />
               {!!meta.total_avaliacoes && meta.total_avaliacoes > 0 && (
@@ -336,7 +342,7 @@ export function LeadsTable() {
         )
       },
     },
-    // DECISOR — name + cargo
+    // DECISOR — name (link, editável via pencil) + cargo (inline edit)
     {
       accessorKey: 'decisor_nome',
       header: ({ column }) => (
@@ -346,15 +352,19 @@ export function LeadsTable() {
       ),
       cell: ({ row }) => (
         <div className="min-w-0">
-          <Link
-            href={`/leads/${row.original.id}`}
-            className="block truncate text-sm font-medium text-[var(--text-primary)] hover:underline"
-          >
-            {row.original.decisor_nome}
-          </Link>
-          <p className="text-[11px] text-[var(--text-tertiary)] truncate">
-            {row.original.decisor_cargo || '—'}
-          </p>
+          <EditableCell
+            leadId={row.original.id}
+            field="decisor_nome"
+            value={row.original.decisor_nome}
+            className="text-sm font-medium text-[var(--text-primary)]"
+          />
+          <div className="text-[11px] text-[var(--text-tertiary)]">
+            <EditableCell
+              leadId={row.original.id}
+              field="decisor_cargo"
+              value={row.original.decisor_cargo}
+            />
+          </div>
         </div>
       ),
     },
@@ -469,6 +479,13 @@ export function LeadsTable() {
       cell: ({ getValue }) => (
         <PipelineBadge status={getValue() as PipelineStatus} />
       ),
+    },
+    // AÇÕES — botão "Enriquecer" (busca dados adicionais via Receita + website probe)
+    {
+      id: 'actions',
+      header: () => <span className="block text-center">Ações</span>,
+      cell: ({ row }) => <EnrichButton leadId={row.original.id} />,
+      enableSorting: false,
     },
   ]
 
@@ -813,6 +830,56 @@ export function LeadsTable() {
         leadIds={getSelectedLeadIds()}
         onAssigned={() => setRowSelection({})}
       />
+    </div>
+  )
+}
+
+/**
+ * Botão "Enriquecer" por linha — chama leads.enrich, que roda BrasilAPI +
+ * ReceitaWS + website probe e preenche apenas campos vazios do lead.
+ *
+ * Mostra o spinner durante a busca, toast com resumo dos findings ao fim,
+ * e força refetch da listagem pra UI mostrar os campos novos imediatos.
+ */
+function EnrichButton({ leadId }: { leadId: string }) {
+  const utils = trpc.useUtils()
+  const enrich = trpc.leads.enrich.useMutation({
+    onSuccess: (data) => {
+      utils.leads.list.invalidate()
+      if (data.updated) {
+        toast.success('Dados atualizados', {
+          description: data.findings.length > 0 ? data.findings.join(' · ') : undefined,
+        })
+      } else {
+        toast.info('Nada novo encontrado', {
+          description: data.findings.length > 0 ? data.findings.join(' · ') : 'Lead já está completo.',
+        })
+      }
+    },
+    onError: (err) => {
+      toast.error('Falha no enriquecimento', { description: err.message })
+    },
+  })
+
+  return (
+    <div className="text-center">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          if (!enrich.isPending) enrich.mutate({ id: leadId })
+        }}
+        disabled={enrich.isPending}
+        className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--border)] bg-white px-2 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--primary)] hover:bg-[var(--primary-soft)] hover:text-[var(--primary-hover)] disabled:opacity-50"
+        title="Buscar dados adicionais (Receita + Website)"
+      >
+        {enrich.isPending ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <Sparkles className="h-3 w-3" />
+        )}
+        {enrich.isPending ? 'Buscando...' : 'Enriquecer'}
+      </button>
     </div>
   )
 }
